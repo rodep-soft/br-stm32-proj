@@ -1,6 +1,9 @@
 # br-stm32-proj
 
-STM32F767ZI (Nucleo-144) + Zenoh-Pico による ROS 2 通信プロジェクト。
+STM32F767ZI (Nucleo-144) + Zenoh-Pico による **ROS 2 ネイティブ UDP 通信** プロジェクト。  
+中継スクリプトやブリッジを一切介さず、STM32 から直接 ROS 2（`rmw_zenoh_cpp`）ノードおよびトピックとして認識されます。
+
+---
 
 ## クイックスタート
 
@@ -18,41 +21,45 @@ make setup
 make build    # ファームウェアビルド
 make flash    # ST-LINK 経由で STM32 へ書き込み (st-flash / openocd)
 ```
+書き込み後、STM32 本体の黒いリセットボタン（B1）を押してください。
 
-### 3. Zenoh 受信テスト (PC 側)
-ルータ PC (`192.168.50.30`) 経由で STM32 のメッセージを受信する場合：
+---
+
+## 3. ROS 2 からの直接受信 (ネイティブ接続)
+
+中継スクリプト等は一切不要です。ROS 2 の環境変数を設定して直接コマンドを実行します。
+
 ```bash
-make sub ARGS="-m client -e udp/192.168.50.30:7447"
-```
-
-ルータ役の PC 単体で待ち受ける場合：
-```bash
-make sub
-```
-
-### 4. ROS 2 との連携
-
-#### 方法 A: ROS 2 中継ノードの利用 (推奨・確実)
-Zenoh で受信したメッセージをそのまま標準 ROS 2 トピック `/chatter` へパブリッシュします：
-```bash
-# ROS 2 ターミナルで実行
-python3 tools/zenoh_to_ros2.py -e udp/192.168.50.30:7447
-
-# 別のターミナルで受信確認
-ros2 topic list
-ros2 topic echo /chatter
-```
-
-#### 方法 B: rmw_zenoh_cpp による直接受信
-```bash
+# 1. RMW とルータ接続先を設定 (UDP)
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 export ZENOH_CONFIG_OVERRIDE='mode="client";connect/endpoints=["udp/192.168.50.30:7447"]'
 export ROS_DOMAIN_ID=0
 
-ros2 topic echo /chatter std_msgs/msg/String
+# 2. トピック & ノード確認
+ros2 topic list
+ros2 node list
+
+# 3. メッセージ受信
+ros2 topic echo /chatter
 ```
 
-### 5. その他の便利コマンド
+---
+
+## 4. Zenoh 単体テスト (CLI)
+
+ROS 2 を介さず、Zenoh レベルでパケットを直接モニタする場合：
+
+```bash
+# ルータ PC (192.168.50.30) 経由で受信
+make sub ARGS="-m client -e udp/192.168.50.30:7447"
+
+# 自 PC をルータとして受信
+make sub
+```
+
+---
+
+## 5. その他の便利コマンド
 ```bash
 make firewall-off  # PC 側のファイアウォール・パケットフィルタを全開放 (要 sudo)
 make router        # スタンドアロン zenohd ルータの起動
