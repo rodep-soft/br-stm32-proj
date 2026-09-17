@@ -39,9 +39,12 @@ extern struct netif gnetif;
 #define ZENOH_KEYEXPR ROS_DOMAIN_ID "/" ROS_TOPIC_NAME "/" ROS_MSG_TYPE "/" ROS_TYPE_HASH
 #define ZENOH_VALUE_PREFIX "Hello from STM32F767ZI Zenoh-Pico!"
 
+// IP addresses of Zenoh peers
+// UDP通信
 static const char *const ZENOH_LOCATORS[] = {
-    "tcp/192.168.50.30:7447",
-    "tcp/192.168.50.50:7447",
+    "udp/192.168.50.10:7447",
+    "udp/192.168.50.30:7447",
+    "udp/192.168.50.50:7447",
 };
 #define ZENOH_LOCATOR_COUNT (sizeof(ZENOH_LOCATORS) / sizeof(ZENOH_LOCATORS[0]))
 
@@ -174,3 +177,5 @@ void app_zenoh_start(void) {
     osThreadDef(zenohTask, zenoh_task, osPriorityNormal, 0, 2048);
     osThreadCreate(osThread(zenohTask), NULL);
 }
+
+

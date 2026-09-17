@@ -23,7 +23,7 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 HAS_NIX      := $(shell command -v nix 2>/dev/null)
 
-.PHONY: all setup dev shell msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
 
 # Default target
 all: build
@@ -56,6 +56,19 @@ setup:
 	@echo "==> [Setup] Generating message headers..."
 	@$(MAKE) msg
 	@echo "==> [Setup] Complete! Run 'make build' to compile."
+	@echo "==> [Setup] (Tip: Run 'make udev' once if you need non-root ST-LINK access permissions)"
+
+# Install ST-LINK udev rules to allow flashing without sudo
+udev:
+	@echo "==> [udev] Installing ST-LINK rules to /etc/udev/rules.d/..."
+	@if [ -f /etc/NIXOS ]; then \
+		echo "[udev] Note: On NixOS, consider setting 'services.udev.packages = [ pkgs.stlink ];' in your configuration.nix."; \
+	fi
+	@sudo cp tools/udev/49-stlink.rules /etc/udev/rules.d/
+	@sudo udevadm control --reload-rules
+	@sudo udevadm trigger
+	@echo "==> [udev] Rules installed and reloaded successfully!"
+	@echo "==> [udev] If your ST-LINK is currently plugged in, please replug the USB cable."
 
 # Enter Nix development shell
 dev shell:
@@ -187,6 +200,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make dev / make shell - Enter the Nix development shell"
 	@echo "  make setup            - Initialize submodules and dependencies / direnv"
+	@echo "  make udev             - Install ST-LINK udev rules to allow flashing without sudo"
 	@echo "  make build            - Generate headers and build STM32 firmware (default)"
 	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
 	@echo "  make flash-openocd    - Build and flash to STM32 via OpenOCD"
