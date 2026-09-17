@@ -46,17 +46,15 @@ add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Use custom FindThreads module to prevent linking -lpthreads in bare-metal toolchains
+list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+
 # Configure zenoh-pico for FreeRTOS + LwIP
 set(ZP_PLATFORM "freertos_lwip" CACHE STRING "Zenoh-Pico platform" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static lib" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
 set(CHECK_THREADS OFF CACHE BOOL "Disable check threads" FORCE)
-set(CMAKE_THREAD_LIBS_INIT "" CACHE STRING "" FORCE)
-set(CMAKE_HAVE_THREADS_LIBRARY 1 CACHE BOOL "" FORCE)
-
-# Override platform directory to disable CHECK_THREADS for freertos_lwip
-list(INSERT ZP_PLATFORM_DIRS 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/zenoh_platform")
 
 add_subdirectory(third_party/zenoh-pico)
 target_link_libraries(zenohpico_static PUBLIC stm32cubemx)
