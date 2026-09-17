@@ -1,0 +1,62 @@
+name: Build STM32 Firmware
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build Firmware with arm-none-eabi-gcc
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install ARM GNU Toolchain and Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib \
+            ninja-build \
+            cmake \
+            python3
+
+      - name: Verify Toolchain
+        run: |
+          arm-none-eabi-gcc --version
+          cmake --version
+          ninja --version
+
+      - name: Generate ROS 2 message headers
+        run: |
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir test_msgs/msg --out-dir Core/Inc/generated
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake
+
+      - name: Build Firmware
+        run: |
+          cmake --build build --parallel
+
+      - name: Print Firmware Memory Usage
+        run: |
+          arm-none-eabi-size build/abeshitest.elf
+
+      - name: Upload Firmware Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stm32-firmware
+          path: |
+            build/abeshitest.elf
+            build/abeshitest.bin
+            build/abeshitest.map
