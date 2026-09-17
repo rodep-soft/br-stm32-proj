@@ -138,36 +138,41 @@ def main():
     if args.connect:
         conf.insert_json5("connect/endpoints", json.dumps(args.connect))
 
-    print("==========================================================", flush=True)
-    print("      Zenoh Test Subscriber (STM32 Zenoh-Pico Test)      ", flush=True)
-    print("==========================================================", flush=True)
-    print(f"Mode       : {args.mode}", flush=True)
-    print(f"Listening  : {', '.join(args.listen)}", flush=True)
-    if args.connect:
-        print(f"Connecting : {', '.join(args.connect)}", flush=True)
-    print(f"Subscribed : {args.key}", flush=True)
-    print("==========================================================", flush=True)
-    print("Waiting for messages from STM32... (Press Ctrl+C to stop)", flush=True)
-    print(flush=True)
+    active_mode = args.mode
+    active_endpoints = args.listen if args.mode == "router" else args.connect
 
     try:
         session = zenoh.open(conf)
     except Exception as e:
-        if args.mode == "router" and "Address already in use" in str(e):
-            print("\033[33m[Notice] Port 7447 is already in use (another router/zenohd is active).\033[0m")
-            print("         Switching to client mode and connecting to localhost:7447...", flush=True)
+        err_msg = str(e).lower()
+        if args.mode == "router" and any(k in err_msg for k in ["already in use", "os error 98", "eaddrinuse", "can not create"]):
             fallback_conf = zenoh.Config()
             fallback_conf.insert_json5("mode", json.dumps("client"))
-            fallback_conf.insert_json5("connect/endpoints", json.dumps(["tcp/127.0.0.1:7447"]))
+            fallback_conf.insert_json5("connect/endpoints", json.dumps(["tcp/127.0.0.1:7447", "udp/127.0.0.1:7447"]))
             try:
                 session = zenoh.open(fallback_conf)
-                print("\033[32m[Connected] Successfully connected to existing router!\033[0m\n", flush=True)
+                active_mode = "client (concurrent subscriber attached to active router)"
+                active_endpoints = ["tcp/127.0.0.1:7447"]
             except Exception as e2:
-                print(f"\033[31mError connecting to router: {e2}\033[0m")
+                print(f"\033[31mError opening Zenoh session: {e}\033[0m")
+                print(f"\033[31mFallback connection failed: {e2}\033[0m")
                 sys.exit(1)
         else:
             print(f"\033[31mError opening Zenoh session: {e}\033[0m")
             sys.exit(1)
+
+    print("==========================================================", flush=True)
+    print("      Zenoh Test Subscriber (STM32 Zenoh-Pico Test)      ", flush=True)
+    print("==========================================================", flush=True)
+    print(f"Mode       : {active_mode}", flush=True)
+    if active_mode.startswith("router"):
+        print(f"Listening  : {', '.join(active_endpoints)}", flush=True)
+    else:
+        print(f"Connected  : {', '.join(active_endpoints)}", flush=True)
+    print(f"Subscribed : {args.key}", flush=True)
+    print("==========================================================", flush=True)
+    print("Waiting for messages from STM32... (Press Ctrl+C to stop)", flush=True)
+    print(flush=True)
 
     sub = session.declare_subscriber(args.key, listener_callback)
 
