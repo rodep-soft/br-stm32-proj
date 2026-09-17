@@ -68,4 +68,14 @@ make help          # 利用可能コマンド一覧
 
 ## 注意
 
+### zenohd
+
 zenohルータは一つだけ立てること！！
+
+### list
+
+ros2 topic listで出ない場合は環境変数を疑うか、daemonを再起動すること
+
+```bash
+ros2 topic list --no-daemon
+```
