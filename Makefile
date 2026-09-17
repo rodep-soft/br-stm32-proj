@@ -23,7 +23,7 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 HAS_NIX      := $(shell if command -v nix >/dev/null 2>&1 && [ -d /nix/store ]; then echo 1; fi)
 
-.PHONY: all setup dev shell udev nixconf python-deps router zenohd sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev nixconf python-deps firewall-off router zenohd sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
 
 # Default target
 all: build
@@ -109,6 +109,10 @@ udev:
 			echo "==> [udev] Rules installed and reloaded successfully!"; \
 		fi; \
 	fi
+
+# Disable host firewall and flush packet filter rules (ACCEPT all)
+firewall-off:
+	@tools/firewall-off.sh
 
 # Enter Nix development shell
 dev shell:
@@ -267,6 +271,7 @@ help:
 	@echo "  make setup            - Initialize submodules and dependencies / direnv"
 	@echo "  make nixconf          - Configure user nix.conf (Flakes & Cachix binary caches)"
 	@echo "  make udev             - Install ST-LINK udev rules to allow flashing without sudo"
+	@echo "  make firewall-off     - Disable host firewall & packet filters (ACCEPT all, requires sudo)"
 	@echo "  make build            - Generate headers and build STM32 firmware (default)"
 	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
 	@echo "  make flash-openocd    - Build and flash to STM32 via OpenOCD"
