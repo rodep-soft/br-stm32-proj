@@ -2,7 +2,7 @@
 # Makefile for STM32F767ZI Zenoh-Pico Project (Nix & Native Compatible)
 # ==============================================================================
 
-PROJECT_NAME := abeshitest
+PROJECT_NAME := br-stm32
 BUILD_DIR    := build
 TEST_DIR     := tests
 TEST_BUILD   := tests/build

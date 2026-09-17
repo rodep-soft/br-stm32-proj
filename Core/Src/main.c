@@ -110,10 +110,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-  for (volatile uint32_t i = 0; i < 5000000; i++) {
-
-  }
-
 
   /* USER CODE END 2 */
 

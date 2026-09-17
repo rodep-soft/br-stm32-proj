@@ -56,13 +56,13 @@ jobs:
 
       - name: Print Firmware Memory Usage
         run: |
-          arm-none-eabi-size build/abeshitest.elf
+          arm-none-eabi-size build/br-stm32.elf
 
       - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: stm32-firmware
           path: |
-            build/abeshitest.elf
-            build/abeshitest.bin
-            build/abeshitest.map
+            build/br-stm32.elf
+            build/br-stm32.bin
+            build/br-stm32.map
