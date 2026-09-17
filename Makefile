@@ -1,5 +1,5 @@
 # ==============================================================================
-# Makefile for STM32F767ZI Zenoh-Pico Project
+# Makefile for STM32F767ZI Zenoh-Pico Project (Nix & Native Compatible)
 # ==============================================================================
 
 PROJECT_NAME := abeshitest
@@ -19,20 +19,29 @@ FLASH_ADDR   := 0x08000000
 BIN_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).bin
 ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 
-.PHONY: all build flash flash-openocd test clean size msg setup help
+# Detect environment: check if tools are directly available or via Nix
+HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
+HAS_NIX      := $(shell command -v nix 2>/dev/null)
 
-# Default target: build firmware
+.PHONY: all setup dev shell msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+
+# Default target
 all: build
 
 ## -----------------------------------------------------------------------------
-## Environment Setup
+## Environment Setup & Nix Shell
 ## -----------------------------------------------------------------------------
 
+# Setup dependencies and submodules
 setup:
 	@echo "==> [Setup] Initializing Git submodules..."
 	@git submodule update --init --recursive
-	@echo "==> [Setup] Checking/Installing dependencies..."
-	@if command -v apt-get >/dev/null 2>&1; then \
+	@if [ -n "$(HAS_NIX)" ]; then \
+		echo "==> [Setup] Nix detected! Allowing direnv if available..."; \
+		command -v direnv >/dev/null 2>&1 && direnv allow || true; \
+		echo "==> [Setup] Ready! You can run 'nix develop' (or use direnv) to enter the dev shell."; \
+	elif command -v apt-get >/dev/null 2>&1; then \
+		echo "==> [Setup] Debian/Ubuntu detected. Installing dependencies via apt..."; \
 		sudo apt-get update && sudo apt-get install -y --no-install-recommends \
 			gcc-arm-none-eabi \
 			libnewlib-arm-none-eabi \
@@ -42,21 +51,46 @@ setup:
 			stlink-tools \
 			python3; \
 	else \
-		echo "[Setup] Non-Debian system detected. Please ensure arm-none-eabi-gcc, cmake, ninja, and stlink are installed."; \
+		echo "[Setup] Please install Nix (recommended) or native arm-none-eabi toolchain."; \
 	fi
 	@echo "==> [Setup] Generating message headers..."
 	@$(MAKE) msg
-	@echo "==> [Setup] Setup complete! Run 'make build' to compile or 'make flash' to flash."
+	@echo "==> [Setup] Complete! Run 'make build' to compile."
+
+# Enter Nix development shell
+dev shell:
+	@if [ -n "$(HAS_NIX)" ]; then \
+		nix develop; \
+	else \
+		echo "Error: Nix is not installed on this system. See https://nixos.org/download"; \
+		exit 1; \
+	fi
 
 ## -----------------------------------------------------------------------------
-## Build Targets
+## Code Generation (.msg -> Micro-CDR C Header)
 ## -----------------------------------------------------------------------------
 
 msg:
 	@echo "==> [CodeGen] Generating Micro-CDR headers from .msg files..."
 	@$(PYTHON) $(CODEGEN) --package robot_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
 
+## -----------------------------------------------------------------------------
+## Build Targets (Auto-delegates to Nix if tools not in PATH)
+## -----------------------------------------------------------------------------
+
 build: msg
+ifeq ($(strip $(HAS_ARM_GCC)),)
+ifneq ($(strip $(HAS_NIX)),)
+	@echo "==> [Nix] arm-none-eabi-gcc not in PATH. Running build inside Nix shell..."
+	@nix develop --command $(MAKE) do-build
+else
+	@$(MAKE) do-build
+endif
+else
+	@$(MAKE) do-build
+endif
+
+do-build:
 	@echo "==> [Build] Configuring CMake with Ninja..."
 	@cmake -B $(BUILD_DIR) -G Ninja \
 		-DCMAKE_BUILD_TYPE=Debug \
@@ -67,26 +101,70 @@ build: msg
 	@arm-none-eabi-size $(ELF_FILE)
 
 size:
+ifeq ($(strip $(HAS_ARM_GCC)),)
+ifneq ($(strip $(HAS_NIX)),)
+	@nix develop --command arm-none-eabi-size $(ELF_FILE)
+else
 	@arm-none-eabi-size $(ELF_FILE)
+endif
+else
+	@arm-none-eabi-size $(ELF_FILE)
+endif
 
 ## -----------------------------------------------------------------------------
 ## Flashing Targets (ST-LINK)
 ## -----------------------------------------------------------------------------
 
 flash: build
+ifeq ($(shell command -v st-flash 2>/dev/null),)
+ifneq ($(strip $(HAS_NIX)),)
+	@echo "==> [Nix] Running st-flash inside Nix shell..."
+	@nix develop --command $(MAKE) do-flash
+else
+	@$(MAKE) do-flash
+endif
+else
+	@$(MAKE) do-flash
+endif
+
+do-flash:
 	@echo "==> [Flash] Writing $(BIN_FILE) to STM32 via st-flash..."
 	@st-flash --reset write $(BIN_FILE) $(FLASH_ADDR)
 
 flash-openocd: build
+ifeq ($(shell command -v openocd 2>/dev/null),)
+ifneq ($(strip $(HAS_NIX)),)
+	@echo "==> [Nix] Running OpenOCD inside Nix shell..."
+	@nix develop --command $(MAKE) do-flash-openocd
+else
+	@$(MAKE) do-flash-openocd
+endif
+else
+	@$(MAKE) do-flash-openocd
+endif
+
+do-flash-openocd:
 	@echo "==> [Flash] Writing $(BIN_FILE) via OpenOCD..."
 	@openocd -f interface/stlink.cfg -f target/stm32f7x.cfg \
 		-c "program $(BIN_FILE) $(FLASH_ADDR) reset exit"
 
 ## -----------------------------------------------------------------------------
-## Testing Targets
+## Host Unit Testing
 ## -----------------------------------------------------------------------------
 
 test: msg
+ifeq ($(shell command -v cmake 2>/dev/null),)
+ifneq ($(strip $(HAS_NIX)),)
+	@echo "==> [Nix] Running host tests inside Nix shell..."
+	@nix develop --command $(MAKE) do-test
+else
+	@$(MAKE) do-test
+endif
+else
+	@$(MAKE) do-test
+endif
+
+do-test:
 	@echo "==> [Test] Building and running host unit tests..."
 	@cmake -B $(TEST_BUILD) -S $(TEST_DIR) -G Ninja
 	@cmake --build $(TEST_BUILD)
@@ -107,11 +185,12 @@ clean:
 
 help:
 	@echo "Available commands:"
-	@echo "  make setup         - Install toolchains/dependencies and init submodules"
-	@echo "  make build         - Generate msg headers and build STM32 firmware (default)"
-	@echo "  make flash         - Build and flash to STM32 using st-flash"
-	@echo "  make flash-openocd - Build and flash using OpenOCD"
-	@echo "  make test          - Build and run host unit tests"
-	@echo "  make size          - Show firmware memory usage (Flash/RAM)"
-	@echo "  make msg           - Generate C headers from .msg only"
-	@echo "  make clean         - Delete all build files and generated headers"
+	@echo "  make dev / make shell - Enter the Nix development shell"
+	@echo "  make setup            - Initialize submodules and dependencies / direnv"
+	@echo "  make build            - Generate headers and build STM32 firmware (default)"
+	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
+	@echo "  make flash-openocd    - Build and flash to STM32 via OpenOCD"
+	@echo "  make test             - Build and run host unit tests"
+	@echo "  make size             - Show firmware Flash/RAM consumption"
+	@echo "  make msg              - Generate C headers from .msg only"
+	@echo "  make clean            - Remove all build artifacts and generated headers"
