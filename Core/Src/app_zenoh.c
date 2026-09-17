@@ -10,58 +10,17 @@
 #include "lwip/prot/dhcp.h"
 
 #include <zenoh-pico.h>
-#include <ucdr/microcdr.h>
+#include "zenoh_ros2.h"
 
 extern struct netif gnetif;
 
 /* 
- * Zenoh & ROS 2 設定:
- * - ROS 2 トピック名: /chatter
- *   Zenoh 上では ROS トピックはプレフィックス "rt/" が付くため "rt/chatter" になります。
- * - メッセージ型: std_msgs/msg/String (CDR シリアライズ)
- * - ZENOH_MODE:
- *   - "peer"   : 指定した複数のピア (192.168.50.30, 192.168.50.50) と同時に直接ユニキャスト通信します。
- *   - "client" : 指定した複数のルーターのうち利用可能な1つと接続します (フェイルオーバー)。
- * - ZENOH_LOCATORS:
- *   - 接続先を配列で複数指定可能 ("tcp/<IP>:<PORT>", デフォルトポート: 7447)
- *   - 配列が空または空文字列 "" の場合はマルチキャスト自動探索 (UDP scout)
+ * Zenoh 通信設定:
+ * - ZENOH_MODE: "client" (ルーター接続) または "peer"
+ * - ZENOH_LOCATORS: ルーター等の UDP エンドポイント一覧 (ポート 7447)
  */
 #define ZENOH_MODE "client"
 
-/*
- * ROS 2 Lyrical (rmw_zenoh) ネイティブ通信設定 (bridgeなし):
- * - KeyExpr 形式: <domain_id>/<topic_name>/<type_name>/<type_hash>
- * - メッセージ型: std_msgs/msg/String (CDR シリアライズ)
- */
-#define ROS_DOMAIN_ID "0"
-#define ROS_TOPIC_NAME "chatter"
-#define ROS_MSG_TYPE "std_msgs::msg::dds_::String_"
-#define ROS_TYPE_HASH "RIHS01_df668c740482bbd48fb39d76a70dfd4bd59db1288021743503259e948f6b1a18"
-
-#define ZENOH_KEYEXPR ROS_DOMAIN_ID "/" ROS_TOPIC_NAME "/" ROS_MSG_TYPE "/" ROS_TYPE_HASH
-#define ZENOH_VALUE_PREFIX "Hello from STM32F767ZI Zenoh-Pico!"
-
-/*
- * ROS 2 rmw_zenoh_cpp ネイティブ探索用 Liveliness Tokens:
- * 1. Node Token:
- *    @ros2_lv/<domain_id>/<session_id>/<node_id>/<entity_id>/NN/<enclave>/<namespace>/<node_name>
- * 2. Publisher Token:
- *    @ros2_lv/<domain_id>/<session_id>/<node_id>/<entity_id>/MP/<enclave>/<namespace>/<node_name>/<topic_name>/<type_name>/<type_hash>/<qos>
- */
-#define ROS_NODE_NAME "stm32_node"
-#define ROS_SESSION_ID "stm32"
-#define ROS_NODE_ID "1"
-#define ROS_PUB_ID "1"
-
-#define ROS_NODE_LIVELINESS_KEYEXPR \
-    "@ros2_lv/" ROS_DOMAIN_ID "/" ROS_SESSION_ID "/" ROS_NODE_ID "/0/NN/%/%/" ROS_NODE_NAME
-
-#define ROS_PUB_LIVELINESS_KEYEXPR \
-    "@ros2_lv/" ROS_DOMAIN_ID "/" ROS_SESSION_ID "/" ROS_NODE_ID "/" ROS_PUB_ID "/MP/%/%/" \
-    ROS_NODE_NAME "/%" ROS_TOPIC_NAME "/" ROS_MSG_TYPE "/" ROS_TYPE_HASH "/::,:,,:,,:,,"
-
-// IP addresses of Zenoh peers
-// UDP通信
 static const char *const ZENOH_LOCATORS[] = {
     "udp/192.168.50.30:7447",
     "udp/192.168.50.10:7447",
@@ -69,6 +28,12 @@ static const char *const ZENOH_LOCATORS[] = {
     "udp/192.168.50.150:7447",
 };
 #define ZENOH_LOCATOR_COUNT (sizeof(ZENOH_LOCATORS) / sizeof(ZENOH_LOCATORS[0]))
+
+/* ROS 2 設定 */
+#define ROS2_NODE_NAME    "stm32_node"
+#define ROS2_NODE_NS      "/"
+#define ROS2_DOMAIN_ID    0
+#define ROS2_TOPIC_CHATTER "chatter"
 
 /**
  * @brief Zenoh 設定の初期化 (複数ロケータ対応)
@@ -85,40 +50,9 @@ static void init_zenoh_config(z_owned_config_t *config) {
 }
 
 /**
- * @brief Micro-CDR を使用した ROS 2 std_msgs/msg/String 用 CDR シリアライズ関数
- * 
- * ROS 2 の CDR フォーマット:
- * - 4 バイト: CDR encapsulation header (0x00, 0x01, 0x00, 0x00 = CDR Little Endian)
- * - 4 バイト: 文字列長 (uint32_t, null終端文字を含む)
- * - N バイト: 文字列データ + '\0' (Micro-CDR がアライメントと境界チェックを自動処理)
+ * @brief ネットワークリンク & IP アドレス取得待機
  */
-static size_t serialize_ros2_string(uint8_t *dst, size_t dst_max, const char *str) {
-    ucdrBuffer writer;
-    ucdr_init_buffer(&writer, dst, dst_max);
-
-    // 1. CDR Header (Little Endian: 0x00, 0x01, 0x00, 0x00)
-    ucdr_serialize_uint8_t(&writer, 0x00);
-    ucdr_serialize_uint8_t(&writer, 0x01);
-    ucdr_serialize_uint16_t(&writer, 0x0000);
-
-    // 2. 文字列 (長さ + null終端を自動シリアライズ)
-    ucdr_serialize_string(&writer, str);
-
-    if (ucdr_buffer_has_error(&writer)) {
-        return 0;
-    }
-
-    return ucdr_buffer_length(&writer);
-}
-
-static void zenoh_task(void const *argument) {
-    (void)argument;
-
-    printf("\r\n========================================\r\n");
-    printf("   STM32F767ZI Zenoh-Pico -> ROS 2     \r\n");
-    printf("========================================\r\n");
-
-    /* 1. DHCP による IP 取得を待機 */
+static void wait_for_network(void) {
     printf("[ETH] Waiting for IP address...\r\n");
     int wait_sec = 0;
     while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
@@ -155,8 +89,19 @@ static void zenoh_task(void const *argument) {
     printf("[ETH] IP Address : %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
     printf("[ETH] Netmask    : %s\r\n", ip4addr_ntoa(&gnetif.netmask));
     printf("[ETH] Gateway    : %s\r\n", ip4addr_ntoa(&gnetif.gw));
+}
 
-    /* 2. Zenoh セッション設定 */
+static void zenoh_task(void const *argument) {
+    (void)argument;
+
+    printf("\r\n========================================\r\n");
+    printf("   STM32F767ZI Zenoh-Pico -> ROS 2     \r\n");
+    printf("========================================\r\n");
+
+    /* 1. DHCP による IP 取得を待機 */
+    wait_for_network();
+
+    /* 2. Zenoh セッション設定 & オープン */
     z_owned_config_t config;
     init_zenoh_config(&config);
 
@@ -172,7 +117,6 @@ static void zenoh_task(void const *argument) {
     }
     printf("[Zenoh] Mode: %s\r\n", ZENOH_MODE);
 
-    /* 3. Zenoh セッションオープン */
     z_owned_session_t s;
     z_result_t res;
     while ((res = z_open(&s, z_move(config), NULL)) < 0) {
@@ -182,32 +126,20 @@ static void zenoh_task(void const *argument) {
     }
     printf("[Zenoh] Session opened successfully!\r\n");
 
-    /* 4. ROS 2 rmw_zenoh 用 Liveliness Token の宣言 (ROS グラフ探索への登録) */
-    printf("[ROS2] Declaring Liveliness tokens for rmw_zenoh_cpp...\r\n");
-    z_owned_liveliness_token_t node_token, pub_token;
-    z_view_keyexpr_t node_ke, pub_token_ke;
-
-    z_view_keyexpr_from_str_unchecked(&node_ke, ROS_NODE_LIVELINESS_KEYEXPR);
-    if (z_liveliness_declare_token(z_loan(s), &node_token, z_loan(node_ke), NULL) < 0) {
-        printf("[ROS2] Warning: failed to declare node token!\r\n");
-    } else {
-        printf("[ROS2] Node token declared (%s)\r\n", ROS_NODE_NAME);
+    /* 3. ROS 2 Node の初期化 (Liveliness Token の自動宣言) */
+    zenoh_ros2_node_t node;
+    if (!zenoh_ros2_node_init(&node, &s, ROS2_NODE_NAME, ROS2_NODE_NS, ROS2_DOMAIN_ID)) {
+        printf("[ROS2] Failed to initialize node!\r\n");
+        z_drop(z_move(s));
+        return;
     }
 
-    z_view_keyexpr_from_str_unchecked(&pub_token_ke, ROS_PUB_LIVELINESS_KEYEXPR);
-    if (z_liveliness_declare_token(z_loan(s), &pub_token, z_loan(pub_token_ke), NULL) < 0) {
-        printf("[ROS2] Warning: failed to declare publisher token!\r\n");
-    } else {
-        printf("[ROS2] Publisher token declared (/%s)\r\n", ROS_TOPIC_NAME);
-    }
-
-    /* 5. ROS 2 Publisher の宣言 (トピック: /chatter) */
-    printf("[Zenoh] Declaring ROS 2 publisher for '%s' (/chatter)...\r\n", ZENOH_KEYEXPR);
-    z_owned_publisher_t pub;
-    z_view_keyexpr_t ke;
-    z_view_keyexpr_from_str_unchecked(&ke, ZENOH_KEYEXPR);
-    if (z_declare_publisher(z_loan(s), &pub, z_loan(ke), NULL) < 0) {
-        printf("[Zenoh] Error: failed to declare publisher!\r\n");
+    /* 4. ROS 2 Publisher の作成 (トピック: /chatter) */
+    zenoh_ros2_pub_t chatter_pub;
+    if (!zenoh_ros2_pub_create(&chatter_pub, &node, ROS2_TOPIC_CHATTER,
+                              ROS2_TYPE_STD_MSGS_STRING, ROS2_HASH_STD_MSGS_STRING)) {
+        printf("[ROS2] Failed to create publisher!\r\n");
+        zenoh_ros2_node_fini(&node);
         z_drop(z_move(s));
         return;
     }
@@ -217,19 +149,16 @@ static void zenoh_task(void const *argument) {
     uint8_t cdr_buf[256];
     uint32_t count = 0;
     while (1) {
-        snprintf(text_buf, sizeof(text_buf), "%s (count: %lu)", ZENOH_VALUE_PREFIX, (unsigned long)count++);
-        printf("[ROS2] Publishing on /chatter: %s\r\n", text_buf);
+        snprintf(text_buf, sizeof(text_buf), "Hello from STM32F767ZI Zenoh-Pico! (count: %lu)", (unsigned long)count++);
+        printf("[ROS2] Publishing on /%s: %s\r\n", ROS2_TOPIC_CHATTER, text_buf);
 
         /* ROS 2 CDR 形式にシリアライズ */
-        size_t cdr_len = serialize_ros2_string(cdr_buf, sizeof(cdr_buf), text_buf);
+        size_t cdr_len = zenoh_ros2_serialize_string(cdr_buf, sizeof(cdr_buf), text_buf);
 
-        /* Zenoh パブリッシュ */
-        z_owned_bytes_t payload;
-        z_bytes_copy_from_buf(&payload, cdr_buf, cdr_len);
-
-        z_publisher_put_options_t options;
-        z_publisher_put_options_default(&options);
-        z_publisher_put(z_loan(pub), z_move(payload), &options);
+        /* パブリッシュ送信 */
+        if (cdr_len > 0) {
+            zenoh_ros2_pub_send(&chatter_pub, cdr_buf, cdr_len);
+        }
 
         /* 通信時に LED2 (緑) をトグル */
         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
@@ -238,9 +167,8 @@ static void zenoh_task(void const *argument) {
     }
 
     /* クリーンアップ */
-    z_drop(z_move(pub_token));
-    z_drop(z_move(node_token));
-    z_drop(z_move(pub));
+    zenoh_ros2_pub_destroy(&chatter_pub);
+    zenoh_ros2_node_fini(&node);
     z_drop(z_move(s));
 }
 
@@ -249,5 +177,3 @@ void app_zenoh_start(void) {
     osThreadDef(zenohTask, zenoh_task, osPriorityNormal, 0, 2048);
     osThreadCreate(osThread(zenohTask), NULL);
 }
-
-
