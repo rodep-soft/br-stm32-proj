@@ -23,7 +23,7 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 HAS_NIX      := $(shell if command -v nix >/dev/null 2>&1 && [ -d /nix/store ]; then echo 1; fi)
 
-.PHONY: all setup dev shell udev nixconf python-deps sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev nixconf python-deps router zenohd sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
 
 # Default target
 all: build
@@ -209,6 +209,20 @@ do-flash-openocd:
 ## Zenoh Testing & Inspection
 ## -----------------------------------------------------------------------------
 
+# Run standalone Zenoh router (auto-downloads official binary if not found)
+router zenohd:
+	@if ! command -v zenohd >/dev/null 2>&1; then \
+		echo "==> [Zenoh] Downloading official zenohd binary..."; \
+		mkdir -p $(HOME)/.local/bin; \
+		curl -sL https://github.com/eclipse-zenoh/zenoh/releases/download/1.10.1/zenoh-1.10.1-x86_64-unknown-linux-gnu-standalone.zip -o /tmp/zenoh-bin.zip; \
+		unzip -q -o /tmp/zenoh-bin.zip zenohd -d $(HOME)/.local/bin/; \
+		chmod +x $(HOME)/.local/bin/zenohd; \
+		rm -f /tmp/zenoh-bin.zip; \
+		echo "==> [Zenoh] Installed zenohd to $(HOME)/.local/bin/zenohd"; \
+	fi
+	@echo "==> [Zenoh] Starting zenohd router on UDP & TCP 7447..."
+	@zenohd --listen udp/0.0.0.0:7447 --listen tcp/0.0.0.0:7447
+
 sub zenoh-sub: python-deps
 	@$(PYTHON) tools/zenoh_sub.py
 
@@ -256,6 +270,7 @@ help:
 	@echo "  make build            - Generate headers and build STM32 firmware (default)"
 	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
 	@echo "  make flash-openocd    - Build and flash to STM32 via OpenOCD"
+	@echo "  make router           - Run standalone Zenoh router (zenohd) on UDP/TCP 7447"
 	@echo "  make sub              - Run Zenoh router & subscriber to receive STM32 messages"
 	@echo "  make test             - Build and run host unit tests"
 	@echo "  make size             - Show firmware Flash/RAM consumption"
