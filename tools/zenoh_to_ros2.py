@@ -60,7 +60,7 @@ class ZenohRos2Relay(Node):
 
 def main():
     parser = argparse.ArgumentParser(description="Relay Zenoh messages from STM32 to ROS 2 /chatter")
-    parser.add_argument("-e", "--endpoint", default="tcp/192.168.50.30:7447", help="Zenoh router endpoint")
+    parser.add_argument("-e", "--endpoint", default="udp/192.168.50.30:7447", help="Zenoh router endpoint")
     args = parser.parse_args()
 
     rclpy.init()
