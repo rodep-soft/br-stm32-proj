@@ -58,6 +58,8 @@ typedef struct {
     const char *type_name;
     const char *type_hash;
     uint32_t entity_id;
+    int64_t sequence_number;
+    uint8_t gid[16];
     z_owned_publisher_t pub;
     z_owned_liveliness_token_t token;
     bool is_declared;
