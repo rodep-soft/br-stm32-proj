@@ -23,7 +23,7 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 HAS_NIX      := $(shell command -v nix 2>/dev/null)
 
-.PHONY: all setup dev shell udev sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev nixconf sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
 
 # Default target
 all: build
@@ -37,8 +37,8 @@ setup:
 	@echo "==> [Setup] Initializing Git submodules..."
 	@git submodule update --init --recursive
 	@if [ -n "$(HAS_NIX)" ]; then \
-		echo "==> [Setup] Nix detected! Allowing direnv if available..."; \
-		command -v direnv >/dev/null 2>&1 && direnv allow || true; \
+		echo "==> [Setup] Nix detected! Configuring nix.conf & direnv..."; \
+		$(MAKE) nixconf; \
 		echo "==> [Setup] Ready! You can run 'nix develop' (or use direnv) to enter the dev shell."; \
 	elif command -v apt-get >/dev/null 2>&1; then \
 		echo "==> [Setup] Debian/Ubuntu detected. Installing dependencies via apt..."; \
@@ -57,6 +57,10 @@ setup:
 	@$(MAKE) msg
 	@echo "==> [Setup] Complete! Run 'make build' to compile."
 	@echo "==> [Setup] (Tip: Run 'make udev' once if you need non-root ST-LINK access permissions)"
+
+# Deploy user Nix configuration (Flakes & Cachix substituters)
+nixconf:
+	@bash tools/nix/setup-nix.sh
 
 # Install ST-LINK udev rules to allow flashing without sudo
 udev:
@@ -207,6 +211,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make dev / make shell - Enter the Nix development shell"
 	@echo "  make setup            - Initialize submodules and dependencies / direnv"
+	@echo "  make nixconf          - Configure user nix.conf (Flakes & Cachix binary caches)"
 	@echo "  make udev             - Install ST-LINK udev rules to allow flashing without sudo"
 	@echo "  make build            - Generate headers and build STM32 firmware (default)"
 	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
