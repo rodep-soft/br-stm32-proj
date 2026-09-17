@@ -23,7 +23,7 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 HAS_NIX      := $(shell command -v nix 2>/dev/null)
 
-.PHONY: all setup dev shell udev msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
 
 # Default target
 all: build
@@ -162,6 +162,13 @@ do-flash-openocd:
 		-c "program $(BIN_FILE) $(FLASH_ADDR) reset exit"
 
 ## -----------------------------------------------------------------------------
+## Zenoh Testing & Inspection
+## -----------------------------------------------------------------------------
+
+sub zenoh-sub:
+	@$(PYTHON) tools/zenoh_sub.py
+
+## -----------------------------------------------------------------------------
 ## Host Unit Testing
 ## -----------------------------------------------------------------------------
 
@@ -204,6 +211,7 @@ help:
 	@echo "  make build            - Generate headers and build STM32 firmware (default)"
 	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
 	@echo "  make flash-openocd    - Build and flash to STM32 via OpenOCD"
+	@echo "  make sub              - Run Zenoh router & subscriber to receive STM32 messages"
 	@echo "  make test             - Build and run host unit tests"
 	@echo "  make size             - Show firmware Flash/RAM consumption"
 	@echo "  make msg              - Generate C headers from .msg only"

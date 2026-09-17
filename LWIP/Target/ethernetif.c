@@ -221,7 +221,14 @@ static void low_level_init(struct netif *netif)
   heth.Init.RxBuffLen = 1536;
 
   /* USER CODE BEGIN MACADDRESS */
-
+  uint32_t uid0 = HAL_GetUIDw0();
+  uint32_t uid1 = HAL_GetUIDw1();
+  MACAddr[0] = 0x02; // Locally administered unicast
+  MACAddr[1] = 0x80;
+  MACAddr[2] = 0xE1;
+  MACAddr[3] = (uint8_t)(uid0 >> 16);
+  MACAddr[4] = (uint8_t)(uid0 >> 8);
+  MACAddr[5] = (uint8_t)(uid0 ^ uid1);
   /* USER CODE END MACADDRESS */
 
   hal_eth_init_status = HAL_ETH_Init(&heth);

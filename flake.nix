@@ -21,8 +21,10 @@
             ninja
             gnumake
             python3
+            python3Packages.pip
             stlink
             openocd
+            zenoh
             git
           ];
 

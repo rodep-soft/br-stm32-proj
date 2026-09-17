@@ -55,8 +55,9 @@ ENTRY(Reset_Handler)
 /* Specify the memory areas */
 MEMORY
 {
-RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 512K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 2048K
+DTCMRAM (xrw)  : ORIGIN = 0x20000000, LENGTH = 128K
+RAM (xrw)      : ORIGIN = 0x20020000, LENGTH = 384K
+FLASH (rx)     : ORIGIN = 0x8000000, LENGTH = 2048K
 }
 
 /* Highest address of the user mode stack */
@@ -225,6 +226,16 @@ SECTIONS
 
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
+
+  .RxDescripSection (NOLOAD) : ALIGN(4)
+  {
+    *(.RxDescripSection)
+  } >RAM
+
+  .TxDescripSection (NOLOAD) : ALIGN(4)
+  {
+    *(.TxDescripSection)
+  } >RAM
 
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack (NOLOAD) :

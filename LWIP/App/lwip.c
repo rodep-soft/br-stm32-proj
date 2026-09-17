@@ -28,7 +28,8 @@
 #include "ethernetif.h"
 
 /* USER CODE BEGIN 0 */
-
+#include "lwip/dhcp.h"
+#include <stdio.h>
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
 static void ethernet_link_status_updated(struct netif *netif);
@@ -102,14 +103,18 @@ void MX_LWIP_Init(void)
   */
 static void ethernet_link_status_updated(struct netif *netif)
 {
-  if (netif_is_up(netif))
+  if (netif_is_link_up(netif))
   {
 /* USER CODE BEGIN 5 */
+    printf("[ETH] Link is UP! Starting DHCP...\r\n");
+    dhcp_start(netif);
 /* USER CODE END 5 */
   }
   else /* netif is down */
   {
 /* USER CODE BEGIN 6 */
+    printf("[ETH] Link is DOWN.\r\n");
+    dhcp_stop(netif);
 /* USER CODE END 6 */
   }
 }

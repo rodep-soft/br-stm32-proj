@@ -6,6 +6,8 @@
 #include "cmsis_os.h"
 #include "lwip/netif.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/dhcp.h"
+#include "lwip/prot/dhcp.h"
 
 #include <zenoh-pico.h>
 #include <ucdr/microcdr.h>
@@ -98,8 +100,37 @@ static void zenoh_task(void const *argument) {
 
     /* 1. DHCP による IP 取得を待機 */
     printf("[ETH] Waiting for IP address...\r\n");
+    int wait_sec = 0;
     while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
-        osDelay(500);
+        osDelay(1000);
+        wait_sec++;
+        struct dhcp *d = netif_dhcp_data(&gnetif);
+        uint8_t dhcp_state = d ? d->state : 255;
+
+        if (wait_sec % 2 == 0) {
+            printf("[ETH] waiting (%ds)... link=%d, netif=%d, dhcp_state=%u, ip=%s\r\n",
+                   wait_sec, netif_is_link_up(&gnetif), netif_is_up(&gnetif),
+                   (unsigned int)dhcp_state, ip4addr_ntoa(&gnetif.ip_addr));
+        }
+
+        /* リンクが上がっているのに DHCP が動いていなければ開始する */
+        if (netif_is_link_up(&gnetif) && (d == NULL || dhcp_state == DHCP_STATE_OFF)) {
+            printf("[ETH] Triggering dhcp_start...\r\n");
+            dhcp_start(&gnetif);
+        }
+
+        /* 10秒待っても DHCP で IP が取得できない場合は固定 IP にフォールバック */
+        if (wait_sec >= 10 && gnetif.ip_addr.addr == 0) {
+            printf("[ETH] DHCP timeout! Falling back to static IP 192.168.50.77...\r\n");
+            dhcp_stop(&gnetif);
+            ip4_addr_t static_ip, static_mask, static_gw;
+            IP4_ADDR(&static_ip, 192, 168, 50, 77);
+            IP4_ADDR(&static_mask, 255, 255, 255, 0);
+            IP4_ADDR(&static_gw, 192, 168, 50, 1);
+            netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
+            netif_set_up(&gnetif);
+            break;
+        }
     }
     printf("[ETH] IP Address : %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
     printf("[ETH] Netmask    : %s\r\n", ip4addr_ntoa(&gnetif.netmask));
