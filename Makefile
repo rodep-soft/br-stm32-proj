@@ -228,7 +228,7 @@ router zenohd:
 	@zenohd --listen udp/0.0.0.0:7447 --listen tcp/0.0.0.0:7447
 
 sub zenoh-sub: python-deps
-	@$(PYTHON) tools/zenoh_sub.py
+	@$(PYTHON) tools/zenoh_sub.py $(ARGS)
 
 ## -----------------------------------------------------------------------------
 ## Host Unit Testing
