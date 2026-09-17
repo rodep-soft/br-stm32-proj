@@ -153,10 +153,21 @@ def main():
     try:
         session = zenoh.open(conf)
     except Exception as e:
-        print(f"\033[31mError opening Zenoh session: {e}\033[0m")
-        if "Address already in use" in str(e):
-            print("Tip: Port 7447 might already be used by another zenohd or session.")
-        sys.exit(1)
+        if args.mode == "router" and "Address already in use" in str(e):
+            print("\033[33m[Notice] Port 7447 is already in use (another router/zenohd is active).\033[0m")
+            print("         Switching to client mode and connecting to localhost:7447...", flush=True)
+            fallback_conf = zenoh.Config()
+            fallback_conf.insert_json5("mode", json.dumps("client"))
+            fallback_conf.insert_json5("connect/endpoints", json.dumps(["tcp/127.0.0.1:7447"]))
+            try:
+                session = zenoh.open(fallback_conf)
+                print("\033[32m[Connected] Successfully connected to existing router!\033[0m\n", flush=True)
+            except Exception as e2:
+                print(f"\033[31mError connecting to router: {e2}\033[0m")
+                sys.exit(1)
+        else:
+            print(f"\033[31mError opening Zenoh session: {e}\033[0m")
+            sys.exit(1)
 
     sub = session.declare_subscriber(args.key, listener_callback)
 
