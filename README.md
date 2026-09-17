@@ -5,12 +5,34 @@ STM32F767ZI (Nucleo-144) + Zenoh-Picoを用いたbr制御用ファームウェ�
 
 ---
 
+## 前提条件: Nix のインストール (未導入の場合)
+
+> [!WARNING]
+> **Ubuntu / Debian の `apt install nix-bin` は絶対に使わないでください！**  
+> `apt` 経由の Nix はバージョンが古く、Flakes やマルチユーザーデーモンが正しく構成されないため動作しません。
+
+必ず公式推奨の **Determinate Nix Installer** を使用してください（Flakes が最初から有効化され、トラブルなく一発で入ります）：
+
+```bash
+# 1. Nix のインストール (要 sudo 権限)
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+
+# 2. シェルを再起動 (または現在のターミナルでパスを反映)
+source /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+
+# 3. 確認
+nix --version
+```
+
+---
+
 ## クイックスタート
 
 ### 1. 環境構築 (初回のみ)
 ```bash
 make setup
 ```
+- Nix 設定 (`nixconf`): Flakes & Cachix バイナリキャッシュの自動登録
 - Git サブモジュール初期化 (`zenoh-pico`, `micro-cdr`)
 - ST-LINK 用 udev ルール設定
 - Python 依存関係インストール (`eclipse-zenoh`, `zenoh-cli`)
