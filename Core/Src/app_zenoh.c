@@ -41,6 +41,25 @@ extern struct netif gnetif;
 #define ZENOH_KEYEXPR ROS_DOMAIN_ID "/" ROS_TOPIC_NAME "/" ROS_MSG_TYPE "/" ROS_TYPE_HASH
 #define ZENOH_VALUE_PREFIX "Hello from STM32F767ZI Zenoh-Pico!"
 
+/*
+ * ROS 2 rmw_zenoh_cpp ネイティブ探索用 Liveliness Tokens:
+ * 1. Node Token:
+ *    @ros2_lv/<domain_id>/<session_id>/<node_id>/<entity_id>/NN/<enclave>/<namespace>/<node_name>
+ * 2. Publisher Token:
+ *    @ros2_lv/<domain_id>/<session_id>/<node_id>/<entity_id>/MP/<enclave>/<namespace>/<node_name>/<topic_name>/<type_name>/<type_hash>/<qos>
+ */
+#define ROS_NODE_NAME "stm32_node"
+#define ROS_SESSION_ID "stm32"
+#define ROS_NODE_ID "1"
+#define ROS_PUB_ID "1"
+
+#define ROS_NODE_LIVELINESS_KEYEXPR \
+    "@ros2_lv/" ROS_DOMAIN_ID "/" ROS_SESSION_ID "/" ROS_NODE_ID "/0/NN/%/%/" ROS_NODE_NAME
+
+#define ROS_PUB_LIVELINESS_KEYEXPR \
+    "@ros2_lv/" ROS_DOMAIN_ID "/" ROS_SESSION_ID "/" ROS_NODE_ID "/" ROS_PUB_ID "/MP/%/%/" \
+    ROS_NODE_NAME "/%" ROS_TOPIC_NAME "/" ROS_MSG_TYPE "/" ROS_TYPE_HASH "/::,:,,:,,:,,"
+
 // IP addresses of Zenoh peers
 // UDP通信
 static const char *const ZENOH_LOCATORS[] = {
@@ -163,7 +182,26 @@ static void zenoh_task(void const *argument) {
     }
     printf("[Zenoh] Session opened successfully!\r\n");
 
-    /* 4. ROS 2 Publisher の宣言 (トピック: /chatter -> Key: rt/chatter) */
+    /* 4. ROS 2 rmw_zenoh 用 Liveliness Token の宣言 (ROS グラフ探索への登録) */
+    printf("[ROS2] Declaring Liveliness tokens for rmw_zenoh_cpp...\r\n");
+    z_owned_liveliness_token_t node_token, pub_token;
+    z_view_keyexpr_t node_ke, pub_token_ke;
+
+    z_view_keyexpr_from_str_unchecked(&node_ke, ROS_NODE_LIVELINESS_KEYEXPR);
+    if (z_liveliness_declare_token(z_loan(s), &node_token, z_loan(node_ke), NULL) < 0) {
+        printf("[ROS2] Warning: failed to declare node token!\r\n");
+    } else {
+        printf("[ROS2] Node token declared (%s)\r\n", ROS_NODE_NAME);
+    }
+
+    z_view_keyexpr_from_str_unchecked(&pub_token_ke, ROS_PUB_LIVELINESS_KEYEXPR);
+    if (z_liveliness_declare_token(z_loan(s), &pub_token, z_loan(pub_token_ke), NULL) < 0) {
+        printf("[ROS2] Warning: failed to declare publisher token!\r\n");
+    } else {
+        printf("[ROS2] Publisher token declared (/%s)\r\n", ROS_TOPIC_NAME);
+    }
+
+    /* 5. ROS 2 Publisher の宣言 (トピック: /chatter) */
     printf("[Zenoh] Declaring ROS 2 publisher for '%s' (/chatter)...\r\n", ZENOH_KEYEXPR);
     z_owned_publisher_t pub;
     z_view_keyexpr_t ke;
@@ -200,6 +238,8 @@ static void zenoh_task(void const *argument) {
     }
 
     /* クリーンアップ */
+    z_drop(z_move(pub_token));
+    z_drop(z_move(node_token));
     z_drop(z_move(pub));
     z_drop(z_move(s));
 }
