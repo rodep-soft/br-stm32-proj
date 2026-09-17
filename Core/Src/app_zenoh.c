@@ -47,6 +47,7 @@ static const char *const ZENOH_LOCATORS[] = {
     "udp/192.168.50.10:7447",
     "udp/192.168.50.30:7447",
     "udp/192.168.50.50:7447",
+    "udp/192.168.50.150:7447",
 };
 #define ZENOH_LOCATOR_COUNT (sizeof(ZENOH_LOCATORS) / sizeof(ZENOH_LOCATORS[0]))
 
