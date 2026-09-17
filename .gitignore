@@ -28,4 +28,5 @@ compile_commands.json
 *~
 .DS_Store
 
-# Temporary generated files (generated headers can be kept or ignored, keeping is usually fine)
+# Generated headers
+Core/Inc/generated/
