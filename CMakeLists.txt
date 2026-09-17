@@ -52,6 +52,11 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static lib" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
 set(CHECK_THREADS OFF CACHE BOOL "Disable check threads" FORCE)
+set(CMAKE_THREAD_LIBS_INIT "" CACHE STRING "" FORCE)
+set(CMAKE_HAVE_THREADS_LIBRARY 1 CACHE BOOL "" FORCE)
+
+# Override platform directory to disable CHECK_THREADS for freertos_lwip
+list(INSERT ZP_PLATFORM_DIRS 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/zenoh_platform")
 
 add_subdirectory(third_party/zenoh-pico)
 target_link_libraries(zenohpico_static PUBLIC stm32cubemx)
@@ -86,7 +91,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Remove wrong libob.a library dependency when using cpp files
-list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
+list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob pthreads pthread)
 
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
