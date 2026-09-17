@@ -38,6 +38,12 @@ jobs:
         run: |
           python3 tools/msg2cdr.py --package robot_msgs --msg-dir test_msgs/msg --out-dir Core/Inc/generated
 
+      - name: Build and Run Host Unit Tests
+        run: |
+          cmake -B tests/build -S tests -G Ninja
+          cmake --build tests/build
+          ./tests/build/test_serialization
+
       - name: Configure CMake
         run: |
           cmake -B build -G Ninja \
