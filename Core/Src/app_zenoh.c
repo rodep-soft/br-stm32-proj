@@ -44,8 +44,8 @@ extern struct netif gnetif;
 // IP addresses of Zenoh peers
 // UDP通信
 static const char *const ZENOH_LOCATORS[] = {
-    "udp/192.168.50.10:7447",
     "udp/192.168.50.30:7447",
+    "udp/192.168.50.10:7447",
     "udp/192.168.50.50:7447",
     "udp/192.168.50.150:7447",
 };
