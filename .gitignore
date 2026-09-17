@@ -1,0 +1,31 @@
+# Build output
+build/
+bin/
+obj/
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.d
+*.su
+
+# CMake artifacts
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# IDE / Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Temporary generated files (generated headers can be kept or ignored, keeping is usually fine)

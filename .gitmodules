@@ -1,0 +1,6 @@
+[submodule "third_party/zenoh-pico"]
+	path = third_party/zenoh-pico
+	url = https://github.com/eclipse-zenoh/zenoh-pico.git
+[submodule "third_party/micro-cdr"]
+	path = third_party/micro-cdr
+	url = https://github.com/eProsima/Micro-CDR.git
