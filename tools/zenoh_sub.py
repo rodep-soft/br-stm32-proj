@@ -13,9 +13,20 @@ import time
 try:
     import zenoh
 except ImportError:
-    print("Error: 'eclipse-zenoh' is not installed.")
-    print("Run: pip install --user eclipse-zenoh zenoh-cli")
-    sys.exit(1)
+    print("==> [Zenoh] 'eclipse-zenoh' is not installed. Installing automatically via pip...")
+    import subprocess
+    cmd = [sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", "eclipse-zenoh", "zenoh-cli"]
+    res = subprocess.run(cmd)
+    if res.returncode != 0:
+        cmd = [sys.executable, "-m", "pip", "install", "--user", "eclipse-zenoh", "zenoh-cli"]
+        subprocess.run(cmd)
+    try:
+        import zenoh
+        print("==> [Zenoh] Successfully installed and loaded 'eclipse-zenoh'!")
+    except ImportError:
+        print("Error: Failed to automatically install 'eclipse-zenoh'.")
+        print("Please run manually: pip install --user eclipse-zenoh zenoh-cli")
+        sys.exit(1)
 
 
 def decode_cdr_string(payload_bytes: bytes):

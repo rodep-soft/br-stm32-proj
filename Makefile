@@ -21,9 +21,9 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 
 # Detect environment: check if tools are directly available or via Nix
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
-HAS_NIX      := $(shell command -v nix 2>/dev/null)
+HAS_NIX      := $(shell if command -v nix >/dev/null 2>&1 && [ -d /nix/store ]; then echo 1; fi)
 
-.PHONY: all setup dev shell udev nixconf sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev nixconf python-deps sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
 
 # Default target
 all: build
@@ -32,16 +32,18 @@ all: build
 ## Environment Setup & Nix Shell
 ## -----------------------------------------------------------------------------
 
-# Setup dependencies and submodules
+# Setup all dependencies, submodules, configurations, and tools
 setup:
-	@echo "==> [Setup] Initializing Git submodules..."
+	@echo "=========================================================="
+	@echo "  Starting Full Environment Setup                         "
+	@echo "=========================================================="
+	@echo "==> [1/5] Initializing Git submodules..."
 	@git submodule update --init --recursive
 	@if [ -n "$(HAS_NIX)" ]; then \
-		echo "==> [Setup] Nix detected! Configuring nix.conf & direnv..."; \
+		echo "==> [2/5] Nix detected! Configuring nix.conf & direnv..."; \
 		$(MAKE) nixconf; \
-		echo "==> [Setup] Ready! You can run 'nix develop' (or use direnv) to enter the dev shell."; \
 	elif command -v apt-get >/dev/null 2>&1; then \
-		echo "==> [Setup] Debian/Ubuntu detected. Installing dependencies via apt..."; \
+		echo "==> [2/5] Debian/Ubuntu detected. Installing dependencies via apt..."; \
 		sudo apt-get update && sudo apt-get install -y --no-install-recommends \
 			gcc-arm-none-eabi \
 			libnewlib-arm-none-eabi \
@@ -51,33 +53,71 @@ setup:
 			stlink-tools \
 			python3; \
 	else \
-		echo "[Setup] Please install Nix (recommended) or native arm-none-eabi toolchain."; \
+		echo "==> [2/5] Toolchain notice: Please install Nix (recommended) or native arm-none-eabi toolchain."; \
 	fi
-	@echo "==> [Setup] Generating message headers..."
+	@echo "==> [3/5] Checking ST-LINK udev rules..."
+	@if [ -f /etc/udev/rules.d/49-stlink.rules ] && cmp -s tools/udev/49-stlink.rules /etc/udev/rules.d/49-stlink.rules 2>/dev/null; then \
+		echo "==> [udev] ST-LINK udev rules are already up-to-date."; \
+	elif sudo -n true 2>/dev/null; then \
+		$(MAKE) udev; \
+	else \
+		echo "==> [udev] Notice: Run 'make udev' once with sudo to enable non-root ST-LINK access."; \
+	fi
+	@echo "==> [4/5] Setting up Python dependencies (Zenoh & tools)..."
+	@$(MAKE) python-deps
+	@echo "==> [5/5] Generating Micro-CDR message headers..."
 	@$(MAKE) msg
-	@echo "==> [Setup] Complete! Run 'make build' to compile."
-	@echo "==> [Setup] (Tip: Run 'make udev' once if you need non-root ST-LINK access permissions)"
+	@echo "=========================================================="
+	@echo "  Setup Complete! All tools and configurations ready.     "
+	@echo "  - Run 'make build'       to compile firmware"
+	@echo "  - Run 'make flash'       to write to STM32"
+	@echo "  - Run 'make sub'         to test Zenoh communication"
+	@echo "=========================================================="
 
 # Deploy user Nix configuration (Flakes & Cachix substituters)
 nixconf:
 	@bash tools/nix/setup-nix.sh
 
+# Install Python tools for Zenoh testing
+python-deps:
+	@if ! $(PYTHON) -c "import zenoh" >/dev/null 2>&1; then \
+		echo "==> [Python] Installing eclipse-zenoh and zenoh-cli..."; \
+		$(PYTHON) -m pip install --user --break-system-packages -q eclipse-zenoh zenoh-cli 2>/dev/null || \
+		$(PYTHON) -m pip install --user -q eclipse-zenoh zenoh-cli 2>/dev/null || \
+		pip install --user -q eclipse-zenoh zenoh-cli 2>/dev/null || true; \
+	else \
+		echo "==> [Python] eclipse-zenoh is already installed."; \
+	fi
+
 # Install ST-LINK udev rules to allow flashing without sudo
 udev:
-	@echo "==> [udev] Installing ST-LINK rules to /etc/udev/rules.d/..."
-	@if [ -f /etc/NIXOS ]; then \
-		echo "[udev] Note: On NixOS, consider setting 'services.udev.packages = [ pkgs.stlink ];' in your configuration.nix."; \
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		if [ -f /etc/NIXOS ]; then \
+			echo "==> [udev] Note: On NixOS, consider setting 'services.udev.packages = [ pkgs.stlink ];' in your configuration.nix."; \
+		elif cmp -s tools/udev/49-stlink.rules /etc/udev/rules.d/49-stlink.rules 2>/dev/null; then \
+			echo "==> [udev] ST-LINK udev rules are already up-to-date in /etc/udev/rules.d/"; \
+		elif [ -w /etc/udev/rules.d ]; then \
+			cp tools/udev/49-stlink.rules /etc/udev/rules.d/; \
+			udevadm control --reload-rules 2>/dev/null || true; \
+			udevadm trigger 2>/dev/null || true; \
+			echo "==> [udev] Rules installed successfully!"; \
+		elif command -v sudo >/dev/null 2>&1; then \
+			echo "==> [udev] Installing ST-LINK rules to /etc/udev/rules.d/ (requires sudo)..."; \
+			sudo cp tools/udev/49-stlink.rules /etc/udev/rules.d/; \
+			sudo udevadm control --reload-rules; \
+			sudo udevadm trigger; \
+			echo "==> [udev] Rules installed and reloaded successfully!"; \
+		fi; \
 	fi
-	@sudo cp tools/udev/49-stlink.rules /etc/udev/rules.d/
-	@sudo udevadm control --reload-rules
-	@sudo udevadm trigger
-	@echo "==> [udev] Rules installed and reloaded successfully!"
-	@echo "==> [udev] If your ST-LINK is currently plugged in, please replug the USB cable."
 
 # Enter Nix development shell
 dev shell:
 	@if [ -n "$(HAS_NIX)" ]; then \
 		nix develop; \
+	elif [ -n "$$(command -v nix 2>/dev/null)" ] && [ ! -d /nix/store ]; then \
+		echo "Error: 'nix' command is found, but '/nix/store' directory is missing or not mounted."; \
+		echo "If using Docker or a container, please mount /nix/store or install standard build tools."; \
+		exit 1; \
 	else \
 		echo "Error: Nix is not installed on this system. See https://nixos.org/download"; \
 		exit 1; \
@@ -169,7 +209,7 @@ do-flash-openocd:
 ## Zenoh Testing & Inspection
 ## -----------------------------------------------------------------------------
 
-sub zenoh-sub:
+sub zenoh-sub: python-deps
 	@$(PYTHON) tools/zenoh_sub.py
 
 ## -----------------------------------------------------------------------------
