@@ -94,10 +94,10 @@ bool can_bridge_init(uint32_t baudrate) {
 bool can_bridge_send_frame(const can_msgs_Frame *frame) {
     if (frame == NULL) return false;
 
-    /* Wait for free TX mailbox with 5ms timeout */
+    /* Wait for free TX mailbox with timeout */
     uint32_t wait_start = HAL_GetTick();
     while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
-        if ((HAL_GetTick() - wait_start) > 5) {
+        if ((HAL_GetTick() - wait_start) > CONFIG_CAN_TX_TIMEOUT_MS) {
             return false; /* Timeout */
         }
         osDelay(1);
@@ -159,8 +159,8 @@ static void can_bridge_task(void const *argument) {
             }
         }
 
-        /* Periodic statistics report every 5 seconds if traffic observed */
-        if ((HAL_GetTick() - report_tick) > 5000) {
+        /* Periodic statistics report if traffic observed */
+        if ((HAL_GetTick() - report_tick) > CONFIG_CAN_STATS_PERIOD_MS) {
             report_tick = HAL_GetTick();
             if (g_stats.rx_from_zenoh > 0 || g_stats.tx_to_can_fail > 0) {
                 printf("[CAN Bridge] Stats: RX=%lu, TX_OK=%lu, TX_ERR=%lu, DROPPED=%lu\r\n",

@@ -13,6 +13,7 @@
 #include <stdbool.h>
 #include "main.h"
 #include "generated/Frame.h"
+#include "app_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,11 +25,9 @@ extern "C" {
 #define CAN_BAUDRATE_250K   250000U
 #define CAN_BAUDRATE_125K   125000U
 
-/* Default CAN baudrate */
-#define CAN_BRIDGE_DEFAULT_BAUDRATE CAN_BAUDRATE_500K
-
-/* Queue capacity for incoming CAN frames */
-#define CAN_BRIDGE_QUEUE_SIZE 64
+/* Default CAN settings (configured in app_config.h) */
+#define CAN_BRIDGE_DEFAULT_BAUDRATE CONFIG_CAN_BAUDRATE
+#define CAN_BRIDGE_QUEUE_SIZE       CONFIG_CAN_QUEUE_SIZE
 
 /* Statistics for monitoring */
 typedef struct {
