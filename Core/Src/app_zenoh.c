@@ -11,6 +11,8 @@
 
 #include <zenoh-pico.h>
 #include "zenoh_ros2.h"
+#include "can_bridge.h"
+#include "generated/Frame.h"
 
 extern struct netif gnetif;
 
@@ -30,10 +32,11 @@ static const char *const ZENOH_LOCATORS[] = {
 #define ZENOH_LOCATOR_COUNT (sizeof(ZENOH_LOCATORS) / sizeof(ZENOH_LOCATORS[0]))
 
 /* ROS 2 設定 */
-#define ROS2_NODE_NAME    "stm32_node"
-#define ROS2_NODE_NS      "/"
-#define ROS2_DOMAIN_ID    0
-#define ROS2_TOPIC_CHATTER "chatter"
+#define ROS2_NODE_NAME        "stm32_node"
+#define ROS2_NODE_NS          "/"
+#define ROS2_DOMAIN_ID        0
+#define ROS2_TOPIC_CHATTER    "chatter"
+#define ROS2_TOPIC_CAN_FRAME  "can_msgs/frame"
 
 /**
  * @brief Zenoh 設定の初期化 (複数ロケータ対応)
@@ -91,6 +94,23 @@ static void wait_for_network(void) {
     printf("[ETH] Gateway    : %s\r\n", ip4addr_ntoa(&gnetif.gw));
 }
 
+static void can_frame_sub_callback(const uint8_t *payload, size_t len, void *ctx) {
+    (void)ctx;
+    if (payload == NULL || len == 0) return;
+
+    can_msgs_Frame frame;
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, (uint8_t *)payload, len);
+
+    if (can_msgs_Frame_deserialize(&reader, &frame)) {
+        if (!can_bridge_post_frame(&frame)) {
+            printf("[Bridge] Warning: CAN queue full, frame ID 0x%03lX dropped!\r\n", (unsigned long)frame.id);
+        }
+    } else {
+        printf("[Bridge] Error: Failed to deserialize can_msgs/msg/Frame (len: %zu)!\r\n", len);
+    }
+}
+
 static void zenoh_task(void const *argument) {
     (void)argument;
 
@@ -144,7 +164,17 @@ static void zenoh_task(void const *argument) {
         return;
     }
 
-    /* 5. 定期パブリッシュループ */
+    /* 5. ROS 2 Subscriber の作成 (トピック: can_msgs/frame -> CAN バス垂れ流し) */
+    zenoh_ros2_sub_t can_frame_sub;
+    if (!zenoh_ros2_sub_create(&can_frame_sub, &node, ROS2_TOPIC_CAN_FRAME,
+                              can_msgs_Frame_DDS_TYPE, can_msgs_Frame_TYPE_HASH,
+                              can_frame_sub_callback, NULL)) {
+        printf("[ROS2] Warning: Failed to create subscriber for %s!\r\n", ROS2_TOPIC_CAN_FRAME);
+    } else {
+        printf("[ROS2] Subscribed to /%s -> CAN Bridge active\r\n", ROS2_TOPIC_CAN_FRAME);
+    }
+
+    /* 6. 定期パブリッシュループ */
     char text_buf[128];
     uint8_t cdr_buf[256];
     uint32_t count = 0;
@@ -167,6 +197,7 @@ static void zenoh_task(void const *argument) {
     }
 
     /* クリーンアップ */
+    zenoh_ros2_sub_destroy(&can_frame_sub);
     zenoh_ros2_pub_destroy(&chatter_pub);
     zenoh_ros2_node_fini(&node);
     z_drop(z_move(s));

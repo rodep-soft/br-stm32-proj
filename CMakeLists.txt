@@ -77,6 +77,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/app_zenoh.c
     Core/Src/zenoh_ros2.c
+    Core/Src/can_bridge.c
 )
 
 # Add include paths
