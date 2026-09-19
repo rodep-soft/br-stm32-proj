@@ -47,11 +47,26 @@ class Field:
     def is_string(self) -> bool:
         return self.raw_type == 'string'
 
+    @property
+    def is_header(self) -> bool:
+        return self.raw_type in ('std_msgs/Header', 'std_msgs/msg/Header', 'Header')
 
-def parse_msg_file(file_path: Path) -> list[Field]:
+
+def parse_msg_file(file_path: Path) -> tuple[list[Field], dict[str, str]]:
     fields = []
+    metadata = {}
     with open(file_path, 'r', encoding='utf-8') as f:
         for line in f:
+            # Check for directive comments (e.g., # package: can_msgs or # type_hash: RIHS01_...)
+            m_pkg = re.match(r'^\s*#\s*package\s*[:=]?\s*([a-zA-Z0-9_]+)', line)
+            if m_pkg:
+                metadata['package'] = m_pkg.group(1)
+                continue
+            m_hash = re.match(r'^\s*#\s*(?:type_)?hash\s*[:=]?\s*([a-zA-Z0-9_]+)', line)
+            if m_hash:
+                metadata['type_hash'] = m_hash.group(1)
+                continue
+
             # Strip comments and extra whitespace
             line = re.sub(r'#.*$', '', line).strip()
             if not line:
@@ -71,7 +86,7 @@ def parse_msg_file(file_path: Path) -> list[Field]:
             default_val = parts[2] if len(parts) > 2 else None
 
             # Array check: e.g. float32[3] or int32[10]
-            array_match = re.match(r'^([a-zA-Z0-9_]+)\[([0-9]+)\]$', type_part)
+            array_match = re.match(r'^([a-zA-Z0-9_/]+)\[([0-9]+)\]$', type_part)
             if array_match:
                 base_type = array_match.group(1)
                 array_size = int(array_match.group(2))
@@ -79,7 +94,7 @@ def parse_msg_file(file_path: Path) -> list[Field]:
             else:
                 fields.append(Field(type_part, name_part, default_val=default_val))
 
-    return fields
+    return fields, metadata
 
 
 def compute_rihs01_hash(package_name: str, msg_name: str, fields: list[Field]) -> str:
@@ -105,7 +120,13 @@ def generate_header(package_name: str, msg_file: Path, fields: list[Field], cust
     # Struct fields definition
     struct_lines = []
     for f in fields:
-        if f.is_string:
+        if f.is_header:
+            struct_lines.append(f"""    struct {{
+        int32_t sec;
+        uint32_t nanosec;
+        char frame_id[32];
+    }} {f.name};""")
+        elif f.is_string:
             struct_lines.append(f"    const char* {f.name};")
         elif f.raw_type in TYPE_MAP:
             c_type = TYPE_MAP[f.raw_type][0]
@@ -121,7 +142,11 @@ def generate_header(package_name: str, msg_file: Path, fields: list[Field], cust
     # Serialization statements
     ser_lines = []
     for f in fields:
-        if f.is_string:
+        if f.is_header:
+            ser_lines.append(f"""    ucdr_serialize_int32_t(ub, topic->{f.name}.sec);
+    ucdr_serialize_uint32_t(ub, topic->{f.name}.nanosec);
+    ucdr_serialize_string(ub, topic->{f.name}.frame_id);""")
+        elif f.is_string:
             ser_lines.append(f"    ucdr_serialize_string(ub, topic->{f.name});")
         elif f.raw_type in TYPE_MAP:
             suffix = TYPE_MAP[f.raw_type][1]
@@ -135,7 +160,11 @@ def generate_header(package_name: str, msg_file: Path, fields: list[Field], cust
     # Deserialization statements
     deser_lines = []
     for f in fields:
-        if f.is_string:
+        if f.is_header:
+            deser_lines.append(f"""    ucdr_deserialize_int32_t(ub, &topic->{f.name}.sec);
+    ucdr_deserialize_uint32_t(ub, &topic->{f.name}.nanosec);
+    ucdr_deserialize_string(ub, topic->{f.name}.frame_id, sizeof(topic->{f.name}.frame_id));""")
+        elif f.is_string:
             deser_lines.append(f"    /* string deserialization requires buffer capacity */")
         elif f.raw_type in TYPE_MAP:
             suffix = TYPE_MAP[f.raw_type][1]
@@ -178,6 +207,8 @@ typedef struct {{
  * @brief Serialize {type_name} to CDR format with header
  */
 static inline bool {type_name}_serialize(ucdrBuffer* ub, const {type_name}* topic) {{
+    if (ub == NULL || topic == NULL) return false;
+
     // 1. CDR encapsulation header (Little Endian)
     ucdr_serialize_uint8_t(ub, 0x00);
     ucdr_serialize_uint8_t(ub, 0x01);
@@ -193,6 +224,8 @@ static inline bool {type_name}_serialize(ucdrBuffer* ub, const {type_name}* topi
  * @brief Deserialize {type_name} from CDR format with header
  */
 static inline bool {type_name}_deserialize(ucdrBuffer* ub, {type_name}* topic) {{
+    if (ub == NULL || topic == NULL) return false;
+
     // 1. Consume CDR encapsulation header
     uint8_t dummy8;
     uint16_t dummy16;
@@ -242,12 +275,14 @@ def main():
         sys.exit(1)
 
     for msg_file in msg_files:
-        fields = parse_msg_file(msg_file)
-        header_code = generate_header(args.package, msg_file, fields, custom_hash=args.type_hash)
+        fields, metadata = parse_msg_file(msg_file)
+        pkg = metadata.get('package', args.package)
+        type_hash = metadata.get('type_hash', args.type_hash)
+        header_code = generate_header(pkg, msg_file, fields, custom_hash=type_hash)
         out_file = out_dir / f"{msg_file.stem}.h"
         with open(out_file, 'w', encoding='utf-8') as f:
             f.write(header_code)
-        print(f"[msg2cdr] Generated: {out_file} (fields: {len(fields)})")
+        print(f"[msg2cdr] Generated: {out_file} (package: {pkg}, fields: {len(fields)})")
 
 
 if __name__ == "__main__":
