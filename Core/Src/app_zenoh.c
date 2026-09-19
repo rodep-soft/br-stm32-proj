@@ -187,11 +187,13 @@ static void zenoh_task(void const *argument) {
 
         /* パブリッシュ送信 */
         if (cdr_len > 0) {
-            zenoh_ros2_pub_send(&chatter_pub, cdr_buf, cdr_len);
+            if (zenoh_ros2_pub_send(&chatter_pub, cdr_buf, cdr_len)) {
+                /* 通信成功時に LED2 (緑) をトグル */
+                HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+            } else {
+                printf("[ROS2] Warning: Failed to publish message #%lu\r\n", (unsigned long)count - 1);
+            }
         }
-
-        /* 通信時に LED2 (緑) をトグル */
-        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
         osDelay(1000);
     }

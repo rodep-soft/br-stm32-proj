@@ -30,10 +30,20 @@ bool can_bridge_init(uint32_t baudrate) {
         return false;
     }
 
-    /* 2. Enable CAN1 peripheral clock */
+    /* 2. Enable CAN1 and GPIOB peripheral clocks */
     __HAL_RCC_CAN1_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /* 3. Configure CAN1 peripheral */
+    /* 3. Configure CAN1 GPIO pins (PB8: RX, PB9: TX) */
+    GPIO_InitTypeDef gpio_init = {0};
+    gpio_init.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+    gpio_init.Mode = GPIO_MODE_AF_PP;
+    gpio_init.Pull = GPIO_NOPULL;
+    gpio_init.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    gpio_init.Alternate = GPIO_AF9_CAN1;
+    HAL_GPIO_Init(GPIOB, &gpio_init);
+
+    /* 4. Configure CAN1 peripheral */
     hcan1.Instance = CAN1;
     hcan1.Init.Prescaler = prescaler;
     hcan1.Init.Mode = CAN_MODE_NORMAL;
@@ -141,6 +151,11 @@ static void can_bridge_task(void const *argument) {
                 g_stats.tx_to_can_success++;
             } else {
                 g_stats.tx_to_can_fail++;
+                /* Check for CAN hardware error and recover if needed */
+                uint32_t can_err = HAL_CAN_GetError(&hcan1);
+                if (can_err != HAL_CAN_ERROR_NONE) {
+                    HAL_CAN_ResetError(&hcan1);
+                }
             }
         }
 
@@ -159,6 +174,11 @@ static void can_bridge_task(void const *argument) {
 }
 
 bool can_bridge_start(void) {
+    /* Guard against double initialization */
+    if (g_can_queue != NULL) {
+        return true;
+    }
+
     /* 1. Initialize hardware */
     if (!can_bridge_init(CAN_BRIDGE_DEFAULT_BAUDRATE)) {
         return false;
