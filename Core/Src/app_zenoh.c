@@ -17,15 +17,37 @@
 extern struct netif gnetif;
 
 /* 
+ * ネットワーク静的 IP 設定 (ロボット内 LAN)
+ * - STM32 本機 IP: 192.168.50.10
+ * - ネットマスク  : 255.255.255.0
+ * - ゲートウェイ  : 192.168.50.1
+ */
+#define STATIC_IP_ADDR0   192
+#define STATIC_IP_ADDR1   168
+#define STATIC_IP_ADDR2   50
+#define STATIC_IP_ADDR3   10
+
+#define STATIC_NETMASK0   255
+#define STATIC_NETMASK1   255
+#define STATIC_NETMASK2   255
+#define STATIC_NETMASK3   0
+
+#define STATIC_GW_ADDR0   192
+#define STATIC_GW_ADDR1   168
+#define STATIC_GW_ADDR2   50
+#define STATIC_GW_ADDR3   1
+
+/* 
  * Zenoh 通信設定:
  * - ZENOH_MODE: "client" (ルーター接続) または "peer"
  * - ZENOH_LOCATORS: ルーター等の UDP エンドポイント一覧 (ポート 7447)
+ *   ※ PC (ROS 2 / zenohd) の IP を指定
  */
 #define ZENOH_MODE "client"
 
 static const char *const ZENOH_LOCATORS[] = {
     "udp/192.168.50.30:7447",
-    "udp/192.168.50.10:7447",
+    "udp/192.168.50.2:7447",
     "udp/192.168.50.50:7447",
     "udp/192.168.50.150:7447",
 };
@@ -53,45 +75,29 @@ static void init_zenoh_config(z_owned_config_t *config) {
 }
 
 /**
- * @brief ネットワークリンク & IP アドレス取得待機
+ * @brief 静的 IP 設定 & 物理リンクアップ待機
  */
 static void wait_for_network(void) {
-    printf("[ETH] Waiting for IP address...\r\n");
-    int wait_sec = 0;
-    while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
-        osDelay(1000);
-        wait_sec++;
-        struct dhcp *d = netif_dhcp_data(&gnetif);
-        uint8_t dhcp_state = d ? d->state : 255;
+    /* 1. 静的 IP を設定 */
+    ip4_addr_t static_ip, static_mask, static_gw;
+    IP4_ADDR(&static_ip, STATIC_IP_ADDR0, STATIC_IP_ADDR1, STATIC_IP_ADDR2, STATIC_IP_ADDR3);
+    IP4_ADDR(&static_mask, STATIC_NETMASK0, STATIC_NETMASK1, STATIC_NETMASK2, STATIC_NETMASK3);
+    IP4_ADDR(&static_gw, STATIC_GW_ADDR0, STATIC_GW_ADDR1, STATIC_GW_ADDR2, STATIC_GW_ADDR3);
 
-        if (wait_sec % 2 == 0) {
-            printf("[ETH] waiting (%ds)... link=%d, netif=%d, dhcp_state=%u, ip=%s\r\n",
-                   wait_sec, netif_is_link_up(&gnetif), netif_is_up(&gnetif),
-                   (unsigned int)dhcp_state, ip4addr_ntoa(&gnetif.ip_addr));
-        }
+    netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
+    netif_set_up(&gnetif);
 
-        /* リンクが上がっているのに DHCP が動いていなければ開始する */
-        if (netif_is_link_up(&gnetif) && (d == NULL || dhcp_state == DHCP_STATE_OFF)) {
-            printf("[ETH] Triggering dhcp_start...\r\n");
-            dhcp_start(&gnetif);
-        }
+    printf("[ETH] Static IP Configured:\r\n");
+    printf("[ETH]   IP Address : %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
+    printf("[ETH]   Netmask    : %s\r\n", ip4addr_ntoa(&gnetif.netmask));
+    printf("[ETH]   Gateway    : %s\r\n", ip4addr_ntoa(&gnetif.gw));
 
-        /* 10秒待っても DHCP で IP が取得できない場合は固定 IP にフォールバック */
-        if (wait_sec >= 10 && gnetif.ip_addr.addr == 0) {
-            printf("[ETH] DHCP timeout! Falling back to static IP 192.168.50.77...\r\n");
-            dhcp_stop(&gnetif);
-            ip4_addr_t static_ip, static_mask, static_gw;
-            IP4_ADDR(&static_ip, 192, 168, 50, 77);
-            IP4_ADDR(&static_mask, 255, 255, 255, 0);
-            IP4_ADDR(&static_gw, 192, 168, 50, 1);
-            netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
-            netif_set_up(&gnetif);
-            break;
-        }
+    /* 2. 物理 Ethernet リンクアップを待機（ケーブル接続確認） */
+    printf("[ETH] Waiting for Ethernet physical link...\r\n");
+    while (!netif_is_link_up(&gnetif)) {
+        osDelay(100);
     }
-    printf("[ETH] IP Address : %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
-    printf("[ETH] Netmask    : %s\r\n", ip4addr_ntoa(&gnetif.netmask));
-    printf("[ETH] Gateway    : %s\r\n", ip4addr_ntoa(&gnetif.gw));
+    printf("[ETH] Ethernet link is UP! Ready for communication.\r\n");
 }
 
 static void can_frame_sub_callback(const uint8_t *payload, size_t len, void *ctx) {
