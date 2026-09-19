@@ -41,7 +41,7 @@ if(Python3_FOUND)
     
     add_custom_target(generate_messages
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/msg2cdr.py"
-                --package robot_msgs
+                --package can_msgs
                 --msg-dir "${MSG_DIR}"
                 --out-dir "${GEN_DIR}"
         DEPENDS ${MSG_FILES} "${CMAKE_CURRENT_SOURCE_DIR}/tools/msg2cdr.py"

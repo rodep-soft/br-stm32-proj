@@ -133,7 +133,7 @@ dev shell:
 
 msg:
 	@echo "==> [CodeGen] Generating Micro-CDR headers from .msg files..."
-	@$(PYTHON) $(CODEGEN) --package robot_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
+	@$(PYTHON) $(CODEGEN) --package can_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
 
 ## -----------------------------------------------------------------------------
 ## Build Targets (Auto-delegates to Nix if tools not in PATH)
