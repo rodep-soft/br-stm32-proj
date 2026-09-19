@@ -25,7 +25,6 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "app_zenoh.h"
-#include "can_bridge.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -374,7 +373,6 @@ void StartDefaultTask(void const * argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN 5 */
-  can_bridge_start();
   app_zenoh_start();
   /* Infinite loop */
   for(;;)

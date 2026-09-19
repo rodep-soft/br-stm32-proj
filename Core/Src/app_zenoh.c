@@ -204,6 +204,9 @@ static void zenoh_task(void const *argument) {
 }
 
 void app_zenoh_start(void) {
+    /* CAN Bridge タスクとキューを開始 */
+    can_bridge_start();
+
     /* Zenoh タスクを生成 (スタックサイズ 2048 words = 8KB) */
     osThreadDef(zenohTask, zenoh_task, osPriorityNormal, 0, 2048);
     osThreadCreate(osThread(zenohTask), NULL);
