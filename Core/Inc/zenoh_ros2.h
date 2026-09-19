@@ -29,12 +29,6 @@ extern "C" {
 #define ROS2_TYPE_STD_MSGS_STRING "std_msgs::msg::dds_::String_"
 #define ROS2_HASH_STD_MSGS_STRING "RIHS01_df668c740482bbd48fb39d76a70dfd4bd59db1288021743503259e948f6b1a18"
 
-#define ROS2_TYPE_STD_MSGS_INT32  "std_msgs::msg::dds_::Int32_"
-#define ROS2_HASH_STD_MSGS_INT32  "RIHS01_93e1507d4b4f0b2f5670caae048fa56294d1abcb52b1464c24ccb50a6ef2b1d3"
-
-#define ROS2_TYPE_STD_MSGS_BOOL   "std_msgs::msg::dds_::Bool_"
-#define ROS2_HASH_STD_MSGS_BOOL   "RIHS01_561bc699cfef9fa271f2514eb58c679a6136ff9c065f4ec38d4f4ff70ad255dc"
-
 /**
  * @brief ROS 2 Node representation in Zenoh
  */
