@@ -18,25 +18,9 @@ extern "C" {
 /* ==============================================================================
  * 1. Network (Ethernet / Static IP) Configuration
  * ============================================================================== */
-#define CONFIG_STATIC_IP_ADDR0        192
-#define CONFIG_STATIC_IP_ADDR1        168
-#define CONFIG_STATIC_IP_ADDR2        50
-#define CONFIG_STATIC_IP_ADDR3        10
-
-#define CONFIG_STATIC_NETMASK0        255
-#define CONFIG_STATIC_NETMASK1        255
-#define CONFIG_STATIC_NETMASK2        255
-#define CONFIG_STATIC_NETMASK3        0
-
-#define CONFIG_STATIC_GW_ADDR0        192
-#define CONFIG_STATIC_GW_ADDR1        168
-#define CONFIG_STATIC_GW_ADDR2        50
-#define CONFIG_STATIC_GW_ADDR3        1
-
-/* Helper strings for logging / display */
-#define CONFIG_STATIC_IP_STR          "192.168.50.10"
-#define CONFIG_STATIC_NETMASK_STR     "255.255.255.0"
-#define CONFIG_STATIC_GW_STR          "192.168.50.1"
+#define CONFIG_STATIC_IP              "192.168.50.10"
+#define CONFIG_STATIC_NETMASK         "255.255.255.0"
+#define CONFIG_STATIC_GATEWAY         "192.168.50.1"
 
 /* ==============================================================================
  * 2. Zenoh Communication Configuration

@@ -60,9 +60,9 @@ void MX_LWIP_Init(void)
   tcpip_init( NULL, NULL );
 
   /* IP addresses initialization with Static IP (IPv4) */
-  IP4_ADDR(&ipaddr, CONFIG_STATIC_IP_ADDR0, CONFIG_STATIC_IP_ADDR1, CONFIG_STATIC_IP_ADDR2, CONFIG_STATIC_IP_ADDR3);
-  IP4_ADDR(&netmask, CONFIG_STATIC_NETMASK0, CONFIG_STATIC_NETMASK1, CONFIG_STATIC_NETMASK2, CONFIG_STATIC_NETMASK3);
-  IP4_ADDR(&gw, CONFIG_STATIC_GW_ADDR0, CONFIG_STATIC_GW_ADDR1, CONFIG_STATIC_GW_ADDR2, CONFIG_STATIC_GW_ADDR3);
+  ip4addr_aton(CONFIG_STATIC_IP, &ipaddr);
+  ip4addr_aton(CONFIG_STATIC_NETMASK, &netmask);
+  ip4addr_aton(CONFIG_STATIC_GATEWAY, &gw);
 
   /* add the network interface (IPv4/IPv6) with RTOS */
   netif_add(&gnetif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init, &tcpip_input);

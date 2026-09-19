@@ -44,9 +44,9 @@ static void init_zenoh_config(z_owned_config_t *config) {
 static void wait_for_network(void) {
     /* 1. 静的 IP を設定 */
     ip4_addr_t static_ip, static_mask, static_gw;
-    IP4_ADDR(&static_ip, CONFIG_STATIC_IP_ADDR0, CONFIG_STATIC_IP_ADDR1, CONFIG_STATIC_IP_ADDR2, CONFIG_STATIC_IP_ADDR3);
-    IP4_ADDR(&static_mask, CONFIG_STATIC_NETMASK0, CONFIG_STATIC_NETMASK1, CONFIG_STATIC_NETMASK2, CONFIG_STATIC_NETMASK3);
-    IP4_ADDR(&static_gw, CONFIG_STATIC_GW_ADDR0, CONFIG_STATIC_GW_ADDR1, CONFIG_STATIC_GW_ADDR2, CONFIG_STATIC_GW_ADDR3);
+    ip4addr_aton(CONFIG_STATIC_IP, &static_ip);
+    ip4addr_aton(CONFIG_STATIC_NETMASK, &static_mask);
+    ip4addr_aton(CONFIG_STATIC_GATEWAY, &static_gw);
 
     netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
     netif_set_up(&gnetif);
