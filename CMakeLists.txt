@@ -32,8 +32,29 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
+# Automatic Micro-CDR message header generation from ROS 2 .msg files
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+    set(MSG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/test_msgs/msg")
+    set(GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/generated")
+    file(GLOB MSG_FILES "${MSG_DIR}/*.msg")
+    
+    add_custom_target(generate_messages
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/msg2cdr.py"
+                --package can_msgs
+                --msg-dir "${MSG_DIR}"
+                --out-dir "${GEN_DIR}"
+        DEPENDS ${MSG_FILES} "${CMAKE_CURRENT_SOURCE_DIR}/tools/msg2cdr.py"
+        COMMENT "Generating Micro-CDR C headers from ROS 2 .msg files"
+    )
+endif()
+
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
+
+if(TARGET generate_messages)
+    add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
+endif()
 
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary
@@ -77,6 +98,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/app_zenoh.c
     Core/Src/zenoh_ros2.c
+    Core/Src/can_bridge.c
 )
 
 # Add include paths

@@ -47,20 +47,32 @@ make flash    # ST-LINK 経由で STM32 へ書き込み (st-flash / openocd)
 
 ---
 
-## 3. ROS2統合
+## 3. ROS2統合 (ロボット内静的 IP 構成)
+
+本機（STM32）はロボット実機での高信頼性・即時起動のため、**静的 IP（192.168.50.10）** で動作します。
+ルータ不要で、PC との LAN ケーブル直結やスイッチングハブ接続で即通信可能です。
+
+### PC 側のネットワーク設定例:
+- **IP アドレス**: `192.168.50.2` (または `192.168.50.30`)
+- **ネットマスク**: `255.255.255.0`
+- **ゲートウェイ**: `192.168.50.1`
 
 ```bash
 # 1. RMW とルータ接続先を設定 (UDP)
+# ※ PC の IP が 192.168.50.30 の場合
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
 export ZENOH_CONFIG_OVERRIDE='mode="client";connect/endpoints=["udp/192.168.50.30:7447"]'
 export ROS_DOMAIN_ID=0
 
-# 2. トピック & ノード確認
+# 2. トピック & ノード確認 (STM32 起動後、即座に検出されます)
 ros2 topic list
 ros2 node list
 
 # 3. メッセージ受信
 ros2 topic echo /chatter
+
+# 4. CAN フレーム送信テスト (STM32 の CAN バスへ送出)
+ros2 topic pub /can_msgs/frame can_msgs/msg/Frame "{id: 291, dlc: 8, data: [1,2,3,4,5,6,7,8]}"
 ```
 
 ---
