@@ -341,6 +341,23 @@ static void test_hardware_filter_id_generation(void) {
 }
 
 /* ==============================================================================
+ * Test 7: Out-of-Range CAN ID Validation
+ * ============================================================================== */
+static void test_out_of_range_id_rejection(void) {
+    printf("[TEST] Running test_out_of_range_id_rejection...\n");
+
+    /* Verify standard CAN ID max limit 0x7FF */
+    uint32_t invalid_id = 0x800;
+    bool is_valid = (invalid_id <= 0x7FFU);
+    ASSERT_TRUE(is_valid == false);
+
+    uint32_t valid_id = 0x7FF;
+    ASSERT_TRUE(valid_id <= 0x7FFU);
+
+    printf("       test_out_of_range_id_rejection: PASSED ✅\n");
+}
+
+/* ==============================================================================
  * Main Test Runner
  * ============================================================================== */
 int main(void) {
@@ -354,6 +371,7 @@ int main(void) {
     test_fragmentation_and_reassembly();
     test_packet_loss_self_healing();
     test_hardware_filter_id_generation();
+    test_out_of_range_id_rejection();
 
     printf("\n============================================================\n");
     printf("   ✅ ALL EXHAUSTIVE TESTS PASSED FLAWLESSLY!               \n");

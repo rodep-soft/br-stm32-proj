@@ -151,8 +151,14 @@ static void can_hardware_init(void) {
 
 /* Direct thread-safe CAN transmission */
 static bool can_send_frame(uint32_t id, const uint8_t *data, uint8_t dlc) {
+    /* Validate standard CAN ID range (0x000..0x7FF) and payload */
+    if (id > 0x7FFU || data == NULL) {
+        g_bridge.drop_count++;
+        return false;
+    }
+
     CAN_TxHeaderTypeDef tx_hdr = {
-        .StdId = id & 0x7FF,
+        .StdId = id,
         .IDE = CAN_ID_STD,
         .RTR = CAN_RTR_DATA,
         .DLC = dlc > 8 ? 8 : dlc,
