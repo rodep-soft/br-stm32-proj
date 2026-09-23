@@ -1,16 +1,12 @@
 /**
  * @file app_config.h
- * @brief Production-Grade Centralized Configuration for STM32 Zenoh-CAN Bridge
+ * @brief Ultra-Lean Centralized Configuration & Topic Routing Table
  *
- * All user settings are consolidated here:
- * 1. Network / IP Configuration (Instant Static IP or DHCP Fallback)
- * 2. Zenoh Locators & ROS 2 Graph Domain
- * 3. CAN Bus Bitrate & System Timing
- * 4. FreeRTOS Task Stacks & Queue Depths
- *
- * Robust Design:
- * - Fail-fast compile-time validation (#error on invalid settings)
- * - Automatic hardware timing derivation from human-readable bitrate
+ * ALL USER CONFIGURATIONS AND TOPICS ARE HERE:
+ * 1. Network & IP settings
+ * 2. Zenoh connection locators
+ * 3. CAN bitrate & timings
+ * 4. Master Topic Routing Table (Register topics in 1 line!)
  */
 
 #ifndef APP_CONFIG_H
@@ -18,35 +14,33 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <ucdr/microcdr.h>
+
+/* Generated message headers */
+#include "generated/MotorStatus.h"
+#include "generated/ImuData.h"
+#include "generated/MotorCommand.h"
+#include "generated/Frame.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* ==============================================================================
- * 1. Network (Ethernet) Configuration
+ * 1. Network (Ethernet) Settings
  * ============================================================================== */
-/**
- * Set to 0 for instant Static IP (Recommended for direct robot PC connection, boot < 1s)
- * Set to 1 to try DHCP first, falling back to Static IP after timeout
- */
-#define CONFIG_NET_USE_DHCP           0
-
+#define CONFIG_NET_USE_DHCP           0  /**< 0: Instant static IP (< 1s boot), 1: DHCP fallback */
 #define CONFIG_NET_STATIC_IP          "192.168.50.77"
 #define CONFIG_NET_STATIC_NETMASK     "255.255.255.0"
 #define CONFIG_NET_STATIC_GATEWAY     "192.168.50.1"
-
-#define CONFIG_NET_DHCP_TIMEOUT_SEC   5   /**< Seconds before falling back to static IP */
+#define CONFIG_NET_DHCP_TIMEOUT_SEC   5
 
 /* ==============================================================================
- * 2. Zenoh & ROS 2 Configuration
+ * 2. Zenoh & ROS 2 Settings
  * ============================================================================== */
 #define CONFIG_ZENOH_MODE             "client"
 
-/**
- * Zenoh router endpoints (UDP port 7447).
- * Connects to the first reachable locator.
- */
 #define CONFIG_ZENOH_LOCATOR_LIST \
     "udp/192.168.50.30:7447", \
     "udp/192.168.50.10:7447", \
@@ -58,46 +52,93 @@ extern "C" {
 #define CONFIG_ROS2_DOMAIN_ID         0
 
 /* ==============================================================================
- * 3. CAN Hardware & Bitrate Configuration
+ * 3. CAN Bus Settings
  * ============================================================================== */
-/**
- * Supported Bitrates: 1000000 (1M), 500000 (500k - DEFAULT), 250000 (250k), 125000 (125k)
- * Sample point is fixed at automotive-optimal 87.5% (16 TQ).
- */
-#define CONFIG_CAN_BITRATE            500000U  /**< Default: 500 kbps (Standard for robotics) */
-
-/* Timing & Diagnostic Watchdogs */
-#define CONFIG_CAN_STATS_PERIOD_MS    3000   /**< Diagnostics log interval */
-#define CONFIG_CAN_WATCHDOG_MS        1500   /**< Heartbeat silence timeout before Red LED alert */
-#define CONFIG_CAN_FRAME_TIMEOUT_MS   100    /**< Incomplete multi-frame reassembly drop timeout */
-#define CONFIG_CAN_TX_TIMEOUT_MS      10     /**< Mailbox wait timeout before frame drop */
+#define CONFIG_CAN_BITRATE            500000U  /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
+#define CONFIG_CAN_STATS_PERIOD_MS    3000     /**< Diagnostics reporting interval */
+#define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
+#define CONFIG_CAN_FRAME_TIMEOUT_MS   100      /**< Incomplete multi-frame drop timeout */
+#define CONFIG_CAN_TX_TIMEOUT_MS      10       /**< Mailbox wait timeout */
 
 /* ==============================================================================
- * 4. System Queues & FreeRTOS Resources
+ * 4. FreeRTOS Tasks & Memory Settings
  * ============================================================================== */
-#define CONFIG_QUEUE_CAN_RX_DEPTH     64     /**< Raw CAN frame RX queue depth (in DTCM-RAM) */
-#define CONFIG_QUEUE_CAN_TX_DEPTH     32     /**< Raw CAN frame TX queue depth (in DTCM-RAM) */
-
-#define CONFIG_STACK_ZENOH_TASK       2048   /**< Stack words for Zenoh session manager */
-#define CONFIG_STACK_BRIDGE_TASK      1024   /**< Stack words for CAN->Zenoh worker */
-#define CONFIG_STACK_CAN_TX_TASK      512    /**< Stack words for CAN TX worker */
-#define CONFIG_STACK_STATS_TASK       256    /**< Stack words for diagnostics task */
+#define CONFIG_QUEUE_CAN_RX_DEPTH     64       /**< Raw CAN frame queue size in DTCM-RAM */
+#define CONFIG_STACK_ZENOH_TASK       2048     /**< Stack words for Zenoh manager */
+#define CONFIG_STACK_BRIDGE_TASK      1024     /**< Stack words for CAN->Zenoh worker */
 
 /* ==============================================================================
- * 5. Automatic Compile-Time Validation & Hardware Timing Derivation
+ * 5. Automatic Timing Calculation & Verification
  * ============================================================================== */
-#if (CONFIG_CAN_BITRATE != 1000000U && \
-     CONFIG_CAN_BITRATE != 500000U  && \
-     CONFIG_CAN_BITRATE != 250000U  && \
-     CONFIG_CAN_BITRATE != 125000U)
-#error "Invalid CONFIG_CAN_BITRATE! Supported values: 1000000, 500000, 250000, 125000"
+#if (CONFIG_CAN_BITRATE != 1000000U && CONFIG_CAN_BITRATE != 500000U && \
+     CONFIG_CAN_BITRATE != 250000U  && CONFIG_CAN_BITRATE != 125000U)
+#error "Invalid CONFIG_CAN_BITRATE! Supported: 1000000, 500000, 250000, 125000"
 #endif
 
-/* Auto-derive prescaler: APB1=48MHz, 16 TQ per bit -> 48000000 / (16 * bitrate) */
 #define CONFIG_CAN_PRESCALER          (48000000U / (16U * (CONFIG_CAN_BITRATE)))
-#define CONFIG_CAN_BS1                13     /* CAN_BS1_13TQ */
-#define CONFIG_CAN_BS2                2      /* CAN_BS2_2TQ  */
-#define CONFIG_CAN_SJW                1      /* CAN_SJW_1TQ  */
+
+/* ==============================================================================
+ * 6. Master Topic Routing Table (Declarative)
+ * ============================================================================== */
+typedef bool (*cdr_serialize_fn_t)(ucdrBuffer *ub, const void *topic);
+typedef bool (*cdr_deserialize_fn_t)(ucdrBuffer *ub, void *topic);
+
+typedef enum {
+    BRIDGE_DIR_CAN_TO_ROS = 0,  /**< CAN frames assembled -> ROS 2 (Publish) */
+    BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
+} bridge_dir_t;
+
+typedef struct {
+    const char           *topic_name;
+    bridge_dir_t          dir;
+    uint32_t              can_base_id;
+    size_t                msg_size;
+    const char           *dds_type;
+    const char           *type_hash;
+    cdr_serialize_fn_t    serialize_fn;
+    cdr_deserialize_fn_t  deserialize_fn;
+} bridge_topic_t;
+
+#define BRIDGE_CAN_TO_ROS(topic, msg, can_id) \
+    { \
+        .topic_name     = topic, \
+        .dir            = BRIDGE_DIR_CAN_TO_ROS, \
+        .can_base_id    = can_id, \
+        .msg_size       = sizeof(robot_msgs_##msg), \
+        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
+        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
+        .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
+        .deserialize_fn = NULL, \
+    }
+
+#define BRIDGE_ROS_TO_CAN(topic, msg, can_id) \
+    { \
+        .topic_name     = topic, \
+        .dir            = BRIDGE_DIR_ROS_TO_CAN, \
+        .can_base_id    = can_id, \
+        .msg_size       = sizeof(robot_msgs_##msg), \
+        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
+        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
+        .serialize_fn   = NULL, \
+        .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
+    }
+
+/**
+ * 🌟 MASTER TOPIC TABLE: Add your sensors and actuators here!
+ */
+static const bridge_topic_t g_bridge_topics[] = {
+    /* 1. CAN -> ROS 2: MotorStatus (28B = 4 CAN frames: 0x100..0x103) */
+    BRIDGE_CAN_TO_ROS("motor_status",  MotorStatus,  0x100),
+
+    /* 2. CAN -> ROS 2: ImuData (24B = 3 CAN frames: 0x200..0x202) */
+    BRIDGE_CAN_TO_ROS("imu_data",      ImuData,      0x200),
+
+    /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
+    BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300),
+};
+
+#define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))
+#define BRIDGE_MAX_MSG_SIZE 64
 
 #ifdef __cplusplus
 }
