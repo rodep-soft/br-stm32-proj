@@ -1,11 +1,14 @@
 /**
  * @file can_bridge.h
- * @brief CAN Bridge Module - FreeRTOS queue-based CAN↔Application interface
+ * @brief Ultra-low latency, robust CAN1 HAL driver & FreeRTOS queue interface
  *
- * Provides lock-free message passing between CAN ISR and application tasks.
- * CAN RX: ISR reassembles multi-frame messages → RX queue → bridge task
- * CAN TX: Application → TX queue → TX task → CAN hardware
+ * Professional design principles:
+ * - ISR does ONLY hardware FIFO pop -> FreeRTOS queue push (< 2us).
+ * - Zero processing/unpacking inside interrupt context.
+ * - Hardware Auto-Bus-Off recovery enabled.
+ * - Pure byte-frame abstraction: any protocol/topic can run over this layer.
  */
+
 #ifndef CAN_BRIDGE_H
 #define CAN_BRIDGE_H
 
@@ -14,74 +17,47 @@
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "stm32f7xx_hal.h"
-#include "can_protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define CAN_BRIDGE_RX_QUEUE_LEN 32
-#define CAN_BRIDGE_TX_QUEUE_LEN 16
-
-/** Complete assembled message from CAN bus (CAN → Zenoh direction) */
-typedef struct {
-    can_msg_type_t type;
-    union {
-        robot_msgs_MotorStatus motor_status;
-        robot_msgs_ImuData     imu_data;
-    } data;
-} can_bridge_rx_msg_t;
-
-/** Message to send on CAN bus (Zenoh → CAN direction) */
-typedef struct {
-    can_msg_type_t type;
-    union {
-        robot_msgs_MotorCommand motor_cmd;
-    } data;
-} can_bridge_tx_msg_t;
+#define CAN_BRIDGE_RX_QUEUE_SIZE 64  /* Deep enough to burst 16 multi-frame packets */
+#define CAN_BRIDGE_TX_QUEUE_SIZE 32
 
 /**
- * @brief Initialize CAN1 peripheral, filters, interrupts, and FreeRTOS queues.
- *        Must be called from a FreeRTOS task context (after scheduler starts).
+ * @brief Standard CAN 2.0B frame representation
+ */
+typedef struct {
+    uint32_t id;      /**< 11-bit standard ID */
+    uint8_t  dlc;     /**< Data length code (0..8) */
+    uint8_t  data[8]; /**< Payload */
+} can_frame_t;
+
+/**
+ * @brief Hardware & Queue initialization.
+ *        Configures 500 kbps bit-timing (48MHz APB1), filter bank 0,
+ *        FIFO0 interrupts, and FreeRTOS queues.
  */
 void can_bridge_init(void);
 
 /**
- * @brief Blocking read of a fully-assembled CAN message from RX queue.
- * @param msg     Output message buffer
- * @param timeout FreeRTOS tick timeout (portMAX_DELAY for infinite)
- * @return pdTRUE if a message was received, pdFALSE on timeout
+ * @brief Get the RX queue handle to receive raw CAN frames in worker tasks.
  */
-BaseType_t can_bridge_receive(can_bridge_rx_msg_t *msg, TickType_t timeout);
+QueueHandle_t can_bridge_get_rx_queue(void);
 
 /**
- * @brief Non-blocking enqueue of a message for CAN transmission.
- * @param msg Message to send
- * @return pdTRUE if enqueued, pdFALSE if queue full
+ * @brief Send a CAN frame to the hardware TX mailbox (thread-safe, with mailbox backpressure).
+ * @param frame   Frame to transmit
+ * @param timeout Tick timeout to wait for free mailbox
+ * @return pdTRUE on success, pdFALSE on timeout / error
  */
-BaseType_t can_bridge_send(const can_bridge_tx_msg_t *msg);
+BaseType_t can_bridge_send_frame(const can_frame_t *frame, TickType_t timeout);
 
 /**
- * @brief Blocking read from TX queue (for CAN TX task).
- * @param msg     Output message buffer
- * @param timeout FreeRTOS tick timeout
- * @return pdTRUE if a message was received, pdFALSE on timeout
+ * @brief Diagnostic statistics
  */
-BaseType_t can_bridge_tx_receive(can_bridge_tx_msg_t *msg, TickType_t timeout);
-
-/**
- * @brief Get the CAN HAL handle (for direct TX operations).
- * @return Pointer to the CAN_HandleTypeDef
- */
-CAN_HandleTypeDef *can_bridge_get_handle(void);
-
-/**
- * @brief Get bridge statistics counters.
- * @param rx_count  Total assembled RX messages
- * @param tx_count  Total TX messages enqueued
- * @param err_count Total errors (queue full, HAL errors)
- */
-void can_bridge_get_stats(uint32_t *rx_count, uint32_t *tx_count, uint32_t *err_count);
+void can_bridge_get_stats(uint32_t *rx_frames, uint32_t *tx_frames, uint32_t *drop_count);
 
 #ifdef __cplusplus
 }

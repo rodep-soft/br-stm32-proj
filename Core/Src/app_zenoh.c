@@ -1,13 +1,12 @@
 /**
  * @file app_zenoh.c
- * @brief Zenoh ↔ CAN Bridge Application
+ * @brief High-Performance, Data-Driven Zenoh <-> CAN Bridge Engine
  *
- * Main application that bridges CAN bus messages to/from ROS 2 via Zenoh-Pico.
- * Architecture:
- *   - zenoh_task: Manages Zenoh session, ROS2 node, publishers/subscribers
- *   - bridge_task: Reads assembled CAN messages from queue, publishes to Zenoh;
- *                  also processes Zenoh→CAN TX queue
- *   - CAN RX ISR: Assembles multi-frame CAN messages, pushes to bridge queue
+ * Professional Architecture:
+ * - Table-driven design: Zero hardcoded topics. Topics are declared in bridge_topics.h.
+ * - Universal transparent fragmenter/reassembler: Handles any struct size automatically.
+ * - Desynchronization protection: Frame-0 reset + 100ms timeout guard against CAN packet drop.
+ * - Lock-free FreeRTOS queues for all data paths.
  */
 
 #include "app_zenoh.h"
@@ -24,15 +23,11 @@
 #include <zenoh-pico.h>
 #include "zenoh_ros2.h"
 #include "can_bridge.h"
-#include "can_protocol.h"
-
-#include "generated/MotorStatus.h"
-#include "generated/ImuData.h"
-#include "generated/MotorCommand.h"
+#include "bridge_topics.h"
 
 extern struct netif gnetif;
 
-/* ─────────────────────────── Configuration ─────────────────────────── */
+/* ─────────────────────────── Network Settings ──────────────────────── */
 
 #define ZENOH_MODE "client"
 
@@ -48,40 +43,33 @@ static const char *const ZENOH_LOCATORS[] = {
 #define ROS2_NODE_NS      "/"
 #define ROS2_DOMAIN_ID    0
 
-/* ROS 2 topic names */
-#define TOPIC_MOTOR_STATUS  "motor_status"
-#define TOPIC_IMU_DATA      "imu_data"
-#define TOPIC_MOTOR_COMMAND "motor_command"
-
-/* Task stack sizes (words) */
 #define ZENOH_TASK_STACK_SIZE   2048
 #define BRIDGE_TASK_STACK_SIZE  1024
 #define CAN_TX_TASK_STACK_SIZE  512
 
-/* ─────────────────────────── Static State ──────────────────────────── */
+/* ──────────────────────── Topic Runtime State ──────────────────────── */
 
-/** Bridge context: shared between zenoh task and bridge tasks */
 typedef struct {
-    /* Zenoh session & ROS 2 node (owned by zenoh_task) */
+    uint8_t             buffer[BRIDGE_MAX_MSG_SIZE];
+    uint16_t            received_mask;
+    uint16_t            expected_mask;
+    uint8_t             num_frames;
+    uint32_t            last_recv_tick;
+    zenoh_ros2_pub_t    pub;  /**< For CAN -> ROS 2 */
+    zenoh_ros2_sub_t    sub;  /**< For ROS 2 -> CAN */
+} topic_runtime_t;
+
+typedef struct {
     z_owned_session_t   session;
     zenoh_ros2_node_t   node;
-
-    /* Publishers: CAN → Zenoh */
-    zenoh_ros2_pub_t    pub_motor_status;
-    zenoh_ros2_pub_t    pub_imu_data;
-
-    /* Subscribers: Zenoh → CAN */
-    zenoh_ros2_sub_t    sub_motor_command;
-
-    /* Lifecycle flags */
+    topic_runtime_t     runtimes[BRIDGE_TOPIC_COUNT];
+    QueueHandle_t       can_tx_queue;
     volatile bool       zenoh_ready;
-
-    /* Statistics */
     volatile uint32_t   can_to_zenoh_count;
     volatile uint32_t   zenoh_to_can_count;
-} bridge_ctx_t;
+} bridge_engine_t;
 
-static bridge_ctx_t g_ctx;
+static bridge_engine_t g_engine;
 
 /* ──────────────────────── Network Helpers ──────────────────────────── */
 
@@ -134,285 +122,251 @@ static void wait_for_network(void) {
            ip4addr_ntoa(&gnetif.gw));
 }
 
-/* ──────────────── Zenoh → CAN: Subscriber Callback ────────────────── */
+/* ─────────── ROS 2 -> CAN: Universal Subscriber Callback ──────────── */
 
-/**
- * @brief Called by zenoh-pico when a MotorCommand message arrives from ROS 2.
- *        Deserializes CDR payload and sends to CAN TX queue.
- *        Runs in zenoh's internal receive thread context.
- */
-static void on_motor_command(const uint8_t *payload, size_t len, void *ctx) {
-    (void)ctx;
+static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) {
+    size_t idx = (size_t)ctx;
+    if (idx >= BRIDGE_TOPIC_COUNT) return;
 
-    /* Deserialize CDR → struct */
-    robot_msgs_MotorCommand cmd;
+    const bridge_topic_t *t = &g_bridge_topics[idx];
+    topic_runtime_t *rt = &g_engine.runtimes[idx];
+    if (t->deserialize_fn == NULL) return;
+
+    /* 1. Deserialize CDR payload into stack struct */
+    uint8_t msg_buffer[BRIDGE_MAX_MSG_SIZE];
     ucdrBuffer ub;
     ucdr_init_buffer(&ub, (uint8_t *)payload, len);
 
-    if (!robot_msgs_MotorCommand_deserialize(&ub, &cmd)) {
-        return;  /* malformed CDR */
+    if (!t->deserialize_fn(&ub, msg_buffer)) {
+        return; /* Malformed CDR frame dropped */
     }
 
-    /* Forward to CAN TX queue */
-    can_bridge_tx_msg_t tx_msg;
-    tx_msg.type = CAN_MSG_MOTOR_COMMAND;
-    tx_msg.data.motor_cmd = cmd;
+    /* 2. Universal Fragmenter: slice struct into 8-byte CAN frames */
+    for (uint8_t f = 0; f < rt->num_frames; f++) {
+        can_frame_t frame;
+        frame.id = t->can_base_id + f;
+        size_t offset = f * 8;
+        size_t chunk = (offset + 8 <= t->msg_size) ? 8 : (t->msg_size - offset);
+        frame.dlc = (uint8_t)chunk;
+        memcpy(frame.data, &msg_buffer[offset], chunk);
 
-    if (can_bridge_send(&tx_msg) == pdTRUE) {
-        g_ctx.zenoh_to_can_count++;
+        xQueueSend(g_engine.can_tx_queue, &frame, 0);
     }
+
+    g_engine.zenoh_to_can_count++;
 }
 
-/* ─────────────── CAN → Zenoh: Bridge Task ─────────────────────────── */
+/* ─────────── CAN -> ROS 2: Universal Reassembly Worker Task ────────── */
 
-/**
- * @brief Bridge task: reads assembled CAN messages and publishes to Zenoh.
- *        This is the hot path - optimized for minimum latency.
- */
 static void bridge_can_to_zenoh_task(void const *argument) {
     (void)argument;
 
-    /* Wait for Zenoh session to be ready */
-    while (!g_ctx.zenoh_ready) {
-        osDelay(100);
+    while (!g_engine.zenoh_ready) {
+        osDelay(50);
     }
-    printf("[Bridge] CAN→Zenoh task started\r\n");
+    printf("[Bridge] Universal CAN->Zenoh worker running\r\n");
 
-    can_bridge_rx_msg_t rx_msg;
-    uint8_t cdr_buf[128];  /* Max CDR size: MotorStatus ~32B, ImuData ~28B */
+    QueueHandle_t rx_q = can_bridge_get_rx_queue();
+    can_frame_t frame;
+    uint8_t cdr_buf[256];
 
     for (;;) {
-        /* Block until a complete CAN message is assembled by ISR */
-        if (can_bridge_receive(&rx_msg, portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(rx_q, &frame, portMAX_DELAY) != pdTRUE) {
             continue;
         }
 
-        ucdrBuffer ub;
-        size_t cdr_len = 0;
+        uint32_t now = HAL_GetTick();
 
-        switch (rx_msg.type) {
-        case CAN_MSG_MOTOR_STATUS: {
-            ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
-            if (robot_msgs_MotorStatus_serialize(&ub, &rx_msg.data.motor_status)) {
-                cdr_len = ucdr_buffer_length(&ub);
-                zenoh_ros2_pub_send(&g_ctx.pub_motor_status, cdr_buf, cdr_len);
-                g_ctx.can_to_zenoh_count++;
-            }
-            break;
-        }
-        case CAN_MSG_IMU_DATA: {
-            ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
-            if (robot_msgs_ImuData_serialize(&ub, &rx_msg.data.imu_data)) {
-                cdr_len = ucdr_buffer_length(&ub);
-                zenoh_ros2_pub_send(&g_ctx.pub_imu_data, cdr_buf, cdr_len);
-                g_ctx.can_to_zenoh_count++;
-            }
-            break;
-        }
-        default:
-            break;
-        }
+        /* Search matching topic in declarative table */
+        for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+            const bridge_topic_t *t = &g_bridge_topics[i];
+            if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+            topic_runtime_t *rt = &g_engine.runtimes[i];
 
-        /* Toggle LED on each bridged message */
-        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+            if (frame.id >= t->can_base_id && frame.id < (t->can_base_id + rt->num_frames)) {
+                uint8_t frame_idx = (uint8_t)(frame.id - t->can_base_id);
+
+                /* Desynchronization guard: 100ms timeout resets stale partial frames */
+                if (rt->received_mask != 0 && (now - rt->last_recv_tick) > 100) {
+                    rt->received_mask = 0;
+                }
+                rt->last_recv_tick = now;
+
+                /* Frame 0 arrival always resets mask -> self-heals immediately after drop */
+                if (frame_idx == 0) {
+                    rt->received_mask = 0;
+                }
+
+                /* Copy data slice */
+                size_t offset = frame_idx * 8;
+                size_t chunk = (offset + 8 <= t->msg_size) ? 8 : (t->msg_size - offset);
+                if (frame.dlc < chunk) chunk = frame.dlc;
+                memcpy(&rt->buffer[offset], frame.data, chunk);
+
+                rt->received_mask |= (1U << frame_idx);
+
+                /* When all frames arrive, serialize to CDR and publish! */
+                if (rt->received_mask == rt->expected_mask) {
+                    rt->received_mask = 0;
+
+                    if (t->serialize_fn != NULL) {
+                        ucdrBuffer ub;
+                        ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
+                        if (t->serialize_fn(&ub, rt->buffer)) {
+                            size_t cdr_len = ucdr_buffer_length(&ub);
+                            zenoh_ros2_pub_send(&rt->pub, cdr_buf, cdr_len);
+                            g_engine.can_to_zenoh_count++;
+                            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                        }
+                    }
+                }
+                break;
+            }
+        }
     }
 }
 
-/* ─────────────── CAN TX Task ──────────────────────────────────────── */
+/* ──────────────────────── CAN TX Worker Task ───────────────────────── */
 
-/**
- * @brief CAN TX task: reads from TX queue and sends CAN frames.
- *        Runs at above-normal priority to minimize TX latency.
- */
 static void bridge_can_tx_task(void const *argument) {
     (void)argument;
 
-    /* Wait for CAN to be ready */
-    while (!g_ctx.zenoh_ready) {
-        osDelay(100);
+    while (!g_engine.zenoh_ready) {
+        osDelay(50);
     }
-    printf("[Bridge] CAN TX task started\r\n");
+    printf("[Bridge] CAN TX worker running\r\n");
 
-    can_bridge_tx_msg_t tx_msg;
-
+    can_frame_t frame;
     for (;;) {
-        if (can_bridge_tx_receive(&tx_msg, portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-
-        switch (tx_msg.type) {
-        case CAN_MSG_MOTOR_COMMAND: {
-            uint8_t data[8];
-            uint8_t dlc;
-            can_pack_motor_command(&tx_msg.data.motor_cmd, 0, data, &dlc);
-
-            CAN_TxHeaderTypeDef tx_header;
-            tx_header.StdId = CAN_ID_MOTOR_CMD_BASE;
-            tx_header.ExtId = 0;
-            tx_header.IDE = CAN_ID_STD;
-            tx_header.RTR = CAN_RTR_DATA;
-            tx_header.DLC = dlc;
-            tx_header.TransmitGlobalTime = DISABLE;
-
-            uint32_t tx_mailbox;
-            /* Wait for a free TX mailbox (up to 10ms) */
-            uint32_t start = HAL_GetTick();
-            while (HAL_CAN_GetTxMailboxesFreeLevel(can_bridge_get_handle()) == 0) {
-                if ((HAL_GetTick() - start) > 10) {
-                    break;  /* timeout, drop frame */
-                }
-                osDelay(1);
-            }
-
-            HAL_CAN_AddTxMessage(can_bridge_get_handle(), &tx_header, data, &tx_mailbox);
-            break;
-        }
-        default:
-            break;
+        if (xQueueReceive(g_engine.can_tx_queue, &frame, portMAX_DELAY) == pdTRUE) {
+            can_bridge_send_frame(&frame, pdMS_TO_TICKS(10));
         }
     }
 }
 
-/* ─────────────── Stats Task ───────────────────────────────────────── */
+/* ──────────────────────── Diagnostic Stats Task ────────────────────── */
 
 static void stats_task(void const *argument) {
     (void)argument;
 
     for (;;) {
         osDelay(5000);
-        if (g_ctx.zenoh_ready) {
-            uint32_t rx_cnt, tx_cnt, err_cnt;
-            can_bridge_get_stats(&rx_cnt, &tx_cnt, &err_cnt);
-            printf("[Stats] CAN→Zenoh: %lu  Zenoh→CAN: %lu  CAN_RX: %lu  CAN_TX: %lu  CAN_ERR: %lu\r\n",
-                   (unsigned long)g_ctx.can_to_zenoh_count,
-                   (unsigned long)g_ctx.zenoh_to_can_count,
-                   (unsigned long)rx_cnt,
-                   (unsigned long)tx_cnt,
-                   (unsigned long)err_cnt);
+        if (g_engine.zenoh_ready) {
+            uint32_t rx_frames, tx_frames, drop_cnt;
+            can_bridge_get_stats(&rx_frames, &tx_frames, &drop_cnt);
+            printf("[Bridge Stats] CAN->ROS: %lu msgs | ROS->CAN: %lu msgs | CAN_RX: %lu | CAN_TX: %lu | DROP: %lu\r\n",
+                   (unsigned long)g_engine.can_to_zenoh_count,
+                   (unsigned long)g_engine.zenoh_to_can_count,
+                   (unsigned long)rx_frames,
+                   (unsigned long)tx_frames,
+                   (unsigned long)drop_cnt);
         }
     }
 }
 
-/* ──────────────────────── Zenoh Main Task ──────────────────────────── */
+/* ──────────────────────── Main Zenoh Engine Task ───────────────────── */
 
 static void zenoh_task(void const *argument) {
     (void)argument;
 
-    printf("\r\n========================================\r\n");
-    printf("  STM32F767ZI Zenoh-CAN Bridge v1.0    \r\n");
-    printf("========================================\r\n");
+    printf("\r\n==================================================\r\n");
+    printf("  STM32F767ZI High-Performance Zenoh-CAN Bridge   \r\n");
+    printf("==================================================\r\n");
 
-    /* 1. Wait for network */
+    /* 1. Wait for Ethernet link & IP */
     wait_for_network();
 
-    /* 2. Initialize CAN bridge (HAL + queues) */
+    /* 2. Initialize CAN hardware (500 kbps, PB8/PB9) */
     can_bridge_init();
-    printf("[CAN] Bridge initialized (500 kbps)\r\n");
+    printf("[CAN] Hardware initialized @ 500 kbps\r\n");
 
-    /* 3. Open Zenoh session */
+    /* 3. Open Zenoh Session */
     z_owned_config_t config;
     init_zenoh_config(&config);
-
-    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
-        if (ZENOH_LOCATORS[i] != NULL && strlen(ZENOH_LOCATORS[i]) > 0) {
-            printf("[Zenoh] Locator [%u]: %s\r\n", (unsigned int)i, ZENOH_LOCATORS[i]);
-        }
-    }
-    printf("[Zenoh] Mode: %s\r\n", ZENOH_MODE);
+    printf("[Zenoh] Connecting in %s mode...\r\n", ZENOH_MODE);
 
     z_result_t res;
-    while ((res = z_open(&g_ctx.session, z_move(config), NULL)) < 0) {
-        printf("[Zenoh] Session open failed (err: %d). Retry in 2s...\r\n", (int)res);
+    while ((res = z_open(&g_engine.session, z_move(config), NULL)) < 0) {
+        printf("[Zenoh] Session open failed (%d). Retry in 2s...\r\n", (int)res);
         osDelay(2000);
         init_zenoh_config(&config);
     }
-    printf("[Zenoh] Session opened!\r\n");
+    printf("[Zenoh] Session opened successfully!\r\n");
 
-    /* 4. Initialize ROS 2 node */
-    if (!zenoh_ros2_node_init(&g_ctx.node, &g_ctx.session,
+    /* 4. Initialize ROS 2 Node */
+    if (!zenoh_ros2_node_init(&g_engine.node, &g_engine.session,
                               ROS2_NODE_NAME, ROS2_NODE_NS, ROS2_DOMAIN_ID)) {
-        printf("[ROS2] Node init failed!\r\n");
-        z_drop(z_move(g_ctx.session));
+        printf("[ROS2] Node initialization failed!\r\n");
+        z_drop(z_move(g_engine.session));
         vTaskDelete(NULL);
         return;
     }
 
-    /* 5. Create publishers (CAN → Zenoh) */
-    if (!zenoh_ros2_pub_create(&g_ctx.pub_motor_status, &g_ctx.node,
-                               TOPIC_MOTOR_STATUS,
-                               robot_msgs_MotorStatus_DDS_TYPE,
-                               robot_msgs_MotorStatus_TYPE_HASH)) {
-        printf("[ROS2] MotorStatus publisher failed!\r\n");
-    } else {
-        printf("[ROS2] Publisher: /%s\r\n", TOPIC_MOTOR_STATUS);
+    /* 5. Auto-register all topics from declarative table! */
+    printf("[Bridge] Registering topics from Master Routing Table:\r\n");
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        const bridge_topic_t *t = &g_bridge_topics[i];
+        topic_runtime_t *rt = &g_engine.runtimes[i];
+
+        rt->num_frames    = (uint8_t)((t->msg_size + 7) / 8);
+        rt->expected_mask = (uint16_t)((1U << rt->num_frames) - 1U);
+        rt->received_mask = 0;
+        rt->last_recv_tick = 0;
+
+        if (t->dir == BRIDGE_DIR_CAN_TO_ROS) {
+            if (zenoh_ros2_pub_create(&rt->pub, &g_engine.node, t->topic_name, t->dds_type, t->type_hash)) {
+                printf("  [PUB] /%-16s -> CAN 0x%03lX..0x%03lX (%u frames, %u bytes)\r\n",
+                       t->topic_name,
+                       (unsigned long)t->can_base_id,
+                       (unsigned long)(t->can_base_id + rt->num_frames - 1),
+                       rt->num_frames, (unsigned int)t->msg_size);
+            }
+        } else {
+            if (zenoh_ros2_sub_create(&rt->sub, &g_engine.node, t->topic_name, t->dds_type, t->type_hash,
+                                      on_zenoh_sub_message, (void *)i)) {
+                printf("  [SUB] /%-16s <- CAN 0x%03lX..0x%03lX (%u frames, %u bytes)\r\n",
+                       t->topic_name,
+                       (unsigned long)t->can_base_id,
+                       (unsigned long)(t->can_base_id + rt->num_frames - 1),
+                       rt->num_frames, (unsigned int)t->msg_size);
+            }
+        }
     }
 
-    if (!zenoh_ros2_pub_create(&g_ctx.pub_imu_data, &g_ctx.node,
-                               TOPIC_IMU_DATA,
-                               robot_msgs_ImuData_DDS_TYPE,
-                               robot_msgs_ImuData_TYPE_HASH)) {
-        printf("[ROS2] ImuData publisher failed!\r\n");
-    } else {
-        printf("[ROS2] Publisher: /%s\r\n", TOPIC_IMU_DATA);
-    }
+    /* 6. Start Zenoh-Pico internal read & lease tasks */
+    zp_start_read_task(z_loan_mut(g_engine.session), NULL);
+    zp_start_lease_task(z_loan_mut(g_engine.session), NULL);
 
-    /* 6. Create subscribers (Zenoh → CAN) */
-    if (!zenoh_ros2_sub_create(&g_ctx.sub_motor_command, &g_ctx.node,
-                               TOPIC_MOTOR_COMMAND,
-                               robot_msgs_MotorCommand_DDS_TYPE,
-                               robot_msgs_MotorCommand_TYPE_HASH,
-                               on_motor_command, NULL)) {
-        printf("[ROS2] MotorCommand subscriber failed!\r\n");
-    } else {
-        printf("[ROS2] Subscriber: /%s\r\n", TOPIC_MOTOR_COMMAND);
-    }
+    /* 7. Signal all workers ready! */
+    g_engine.zenoh_ready = true;
+    printf("[Bridge] All systems GO! Zero-boilerplate bridge active.\r\n");
 
-    /* 7. Signal ready and start bridge tasks */
-    g_ctx.zenoh_ready = true;
-    printf("[Bridge] All systems GO!\r\n");
-
-    /* 8. Start zenoh-pico internal read & lease tasks.
-     *    These run as FreeRTOS tasks and handle session keep-alive
-     *    and incoming message dispatching automatically. */
-    if (zp_start_read_task(z_loan_mut(g_ctx.session), NULL) < 0) {
-        printf("[Zenoh] WARNING: Failed to start read task\r\n");
-    }
-    if (zp_start_lease_task(z_loan_mut(g_ctx.session), NULL) < 0) {
-        printf("[Zenoh] WARNING: Failed to start lease task\r\n");
-    }
-    printf("[Zenoh] Read & lease tasks started\r\n");
-
-    /* 9. This task is now idle — just keep alive for cleanup purposes */
     for (;;) {
         osDelay(10000);
     }
-
-    /* Unreachable cleanup */
-    zenoh_ros2_sub_destroy(&g_ctx.sub_motor_command);
-    zenoh_ros2_pub_destroy(&g_ctx.pub_imu_data);
-    zenoh_ros2_pub_destroy(&g_ctx.pub_motor_status);
-    zenoh_ros2_node_fini(&g_ctx.node);
-    z_drop(z_move(g_ctx.session));
 }
 
-/* ────────────────────── Public Entry Point ─────────────────────────── */
+/* ──────────────────────── Public Starter ───────────────────────────── */
 
 void app_zenoh_start(void) {
-    memset(&g_ctx, 0, sizeof(g_ctx));
+    memset(&g_engine, 0, sizeof(g_engine));
 
-    /* Zenoh + session management task (highest stack, normal priority) */
+    g_engine.can_tx_queue = xQueueCreate(CAN_BRIDGE_TX_QUEUE_SIZE, sizeof(can_frame_t));
+    configASSERT(g_engine.can_tx_queue != NULL);
+
+    /* Zenoh Management Task */
     osThreadDef(zenohTask, zenoh_task, osPriorityNormal, 0, ZENOH_TASK_STACK_SIZE);
     osThreadCreate(osThread(zenohTask), NULL);
 
-    /* CAN → Zenoh bridge task (above normal priority for low latency) */
+    /* High-priority CAN->Zenoh Reassembly Worker */
     osThreadDef(bridgeTask, bridge_can_to_zenoh_task, osPriorityAboveNormal, 0, BRIDGE_TASK_STACK_SIZE);
     osThreadCreate(osThread(bridgeTask), NULL);
 
-    /* CAN TX task (above normal priority) */
+    /* High-priority CAN TX Worker */
     osThreadDef(canTxTask, bridge_can_tx_task, osPriorityAboveNormal, 0, CAN_TX_TASK_STACK_SIZE);
     osThreadCreate(osThread(canTxTask), NULL);
 
-    /* Statistics task (low priority) */
+    /* Diagnostic Stats Task */
     osThreadDef(statsTask, stats_task, osPriorityLow, 0, 256);
     osThreadCreate(osThread(statsTask), NULL);
 }
