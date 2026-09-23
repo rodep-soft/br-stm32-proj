@@ -1,21 +1,98 @@
 /**
  * @file can_bridge.c
- * @brief High-performance, minimal-ISR CAN1 HAL driver
+ * @brief High-performance, minimal-ISR CAN1 HAL driver with DTCM-RAM & HW Filtering
  */
 
 #include "can_bridge.h"
 #include <string.h>
 
 static CAN_HandleTypeDef hcan1;
+
+/* ────────────── DTCM-RAM Allocations (Zero-Wait State Memory) ────────── */
+
+/* Place RX Queue control block & storage in DTCM-RAM (0x20000000) for zero cache-miss jitter */
+static uint8_t ucRxQueueStorage[CAN_BRIDGE_RX_QUEUE_SIZE * sizeof(can_frame_t)] __attribute__((section(".dtcmram")));
+static StaticQueue_t xRxQueueBuffer __attribute__((section(".dtcmram")));
 static QueueHandle_t g_rx_queue = NULL;
 
 static volatile uint32_t stat_rx_frames = 0;
 static volatile uint32_t stat_tx_frames = 0;
 static volatile uint32_t stat_drop_count = 0;
 
-void can_bridge_init(void) {
+/* ──────────────────── Hardware Filter Configuration ────────────────── */
+
+static void configure_hardware_filters(const uint32_t *filter_ids, size_t filter_id_count) {
+    if (filter_ids == NULL || filter_id_count == 0) {
+        /* Fallback: Accept all standard IDs */
+        CAN_FilterTypeDef filter = {0};
+        filter.FilterBank           = 0;
+        filter.FilterMode           = CAN_FILTERMODE_IDMASK;
+        filter.FilterScale          = CAN_FILTERSCALE_32BIT;
+        filter.FilterIdHigh         = 0x0000;
+        filter.FilterIdLow          = 0x0000;
+        filter.FilterMaskIdHigh     = 0x0000;
+        filter.FilterMaskIdLow      = 0x0000;
+        filter.FilterFIFOAssignment = CAN_RX_FIFO0;
+        filter.FilterActivation     = ENABLE;
+        filter.SlaveStartFilterBank = 14;
+        HAL_CAN_ConfigFilter(&hcan1, &filter);
+        return;
+    }
+
+    /*
+     * bxCAN 16-bit List Mode:
+     * Each filter bank accommodates 4 exact standard 11-bit IDs.
+     * Standard ID format in 16-bit register: [15:5] = STID[10:0], [4..0] = 0 (RTR=0, IDE=0)
+     */
+    size_t bank_idx = 0;
+    size_t id_idx = 0;
+
+    while (id_idx < filter_id_count && bank_idx < 14) {
+        uint16_t slots[4];
+        for (int s = 0; s < 4; s++) {
+            if (id_idx < filter_id_count) {
+                slots[s] = (uint16_t)((filter_ids[id_idx] & 0x7FF) << 5);
+                id_idx++;
+            } else {
+                /* Fill remaining slots with the last valid ID so no unwanted ID is matched */
+                slots[s] = slots[s > 0 ? s - 1 : 0];
+            }
+        }
+
+        CAN_FilterTypeDef filter = {0};
+        filter.FilterBank           = bank_idx;
+        filter.FilterMode           = CAN_FILTERMODE_IDLIST;
+        filter.FilterScale          = CAN_FILTERSCALE_16BIT;
+        filter.FilterIdHigh         = slots[0];
+        filter.FilterIdLow          = slots[1];
+        filter.FilterMaskIdHigh     = slots[2];
+        filter.FilterMaskIdLow      = slots[3];
+        filter.FilterFIFOAssignment = CAN_RX_FIFO0;
+        filter.FilterActivation     = ENABLE;
+        filter.SlaveStartFilterBank = 14;
+
+        HAL_CAN_ConfigFilter(&hcan1, &filter);
+        bank_idx++;
+    }
+
+    /* Disable any remaining unused filter banks */
+    for (; bank_idx < 14; bank_idx++) {
+        CAN_FilterTypeDef filter = {0};
+        filter.FilterBank           = bank_idx;
+        filter.FilterActivation     = DISABLE;
+        filter.SlaveStartFilterBank = 14;
+        HAL_CAN_ConfigFilter(&hcan1, &filter);
+    }
+}
+
+/* ──────────────────────── Initialization ───────────────────────────── */
+
+void can_bridge_init(const uint32_t *filter_ids, size_t filter_id_count) {
     if (g_rx_queue == NULL) {
-        g_rx_queue = xQueueCreate(CAN_BRIDGE_RX_QUEUE_SIZE, sizeof(can_frame_t));
+        g_rx_queue = xQueueCreateStatic(CAN_BRIDGE_RX_QUEUE_SIZE,
+                                        sizeof(can_frame_t),
+                                        ucRxQueueStorage,
+                                        &xRxQueueBuffer);
         configASSERT(g_rx_queue != NULL);
     }
 
@@ -41,22 +118,8 @@ void can_bridge_init(void) {
         configASSERT(0);
     }
 
-    /* Accept all standard CAN IDs */
-    CAN_FilterTypeDef filter = {0};
-    filter.FilterBank           = 0;
-    filter.FilterMode           = CAN_FILTERMODE_IDMASK;
-    filter.FilterScale          = CAN_FILTERSCALE_32BIT;
-    filter.FilterIdHigh         = 0x0000;
-    filter.FilterIdLow          = 0x0000;
-    filter.FilterMaskIdHigh     = 0x0000;
-    filter.FilterMaskIdLow      = 0x0000;
-    filter.FilterFIFOAssignment = CAN_RX_FIFO0;
-    filter.FilterActivation     = ENABLE;
-    filter.SlaveStartFilterBank = 14;
-
-    if (HAL_CAN_ConfigFilter(&hcan1, &filter) != HAL_OK) {
-        configASSERT(0);
-    }
+    /* Configure hardware filters (exact ID list or all-pass) */
+    configure_hardware_filters(filter_ids, filter_id_count);
 
     if (HAL_CAN_Start(&hcan1) != HAL_OK) {
         configASSERT(0);
@@ -67,7 +130,7 @@ void can_bridge_init(void) {
         configASSERT(0);
     }
 
-    /* Set interrupt priority (Priority 6 is safe for FreeRTOS MAX_SYSCALL=5) */
+    /* Priority 6 (safe for FreeRTOS MAX_SYSCALL=5) */
     HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 6, 0);
     HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
 }
@@ -110,6 +173,18 @@ void can_bridge_get_stats(uint32_t *rx_frames, uint32_t *tx_frames, uint32_t *dr
     if (rx_frames)  *rx_frames  = stat_rx_frames;
     if (tx_frames)  *tx_frames  = stat_tx_frames;
     if (drop_count) *drop_count = stat_drop_count;
+}
+
+void can_bridge_get_bus_health(can_bus_health_t *health) {
+    if (!health) return;
+
+    uint32_t esr = CAN1->ESR;
+    health->tec        = (uint8_t)((esr >> 16) & 0xFF);
+    health->rec        = (uint8_t)((esr >> 24) & 0xFF);
+    health->lec        = (uint8_t)((esr >> 4)  & 0x07);
+    health->is_bus_off = (esr & (1U << 2)) != 0;
+    health->is_passive = (esr & (1U << 1)) != 0;
+    health->is_warning = (esr & (1U << 0)) != 0;
 }
 
 /* ──────────────────── Hardware ISR Context (< 2µs) ──────────────────── */

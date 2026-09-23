@@ -4,8 +4,9 @@
  *
  * Professional Architecture:
  * - Table-driven design: Zero hardcoded topics. Topics are declared in bridge_topics.h.
- * - Universal transparent fragmenter/reassembler: Handles any struct size automatically.
- * - Desynchronization protection: Frame-0 reset + 100ms timeout guard against CAN packet drop.
+ * - Hardware acceptance filtering: Auto-generates exact match ID list from table.
+ * - Deterministic DTCM-RAM buffers: Zero cache-miss jitter on Cortex-M7.
+ * - Comprehensive diagnostics: CAN bus health (TEC, REC, LEC) + per-topic heartbeat watchdog.
  * - Lock-free FreeRTOS queues for all data paths.
  */
 
@@ -55,14 +56,17 @@ typedef struct {
     uint16_t            expected_mask;
     uint8_t             num_frames;
     uint32_t            last_recv_tick;
+    uint32_t            rx_msg_count;
     zenoh_ros2_pub_t    pub;  /**< For CAN -> ROS 2 */
     zenoh_ros2_sub_t    sub;  /**< For ROS 2 -> CAN */
 } topic_runtime_t;
 
+/* Place reassembly runtime state in DTCM-RAM for maximum memory throughput */
+static topic_runtime_t g_runtimes[BRIDGE_TOPIC_COUNT] __attribute__((section(".dtcmram")));
+
 typedef struct {
     z_owned_session_t   session;
     zenoh_ros2_node_t   node;
-    topic_runtime_t     runtimes[BRIDGE_TOPIC_COUNT];
     QueueHandle_t       can_tx_queue;
     volatile bool       zenoh_ready;
     volatile uint32_t   can_to_zenoh_count;
@@ -70,6 +74,10 @@ typedef struct {
 } bridge_engine_t;
 
 static bridge_engine_t g_engine;
+
+/* Static storage for CAN TX queue in DTCM-RAM */
+static uint8_t ucTxQueueStorage[CAN_BRIDGE_TX_QUEUE_SIZE * sizeof(can_frame_t)] __attribute__((section(".dtcmram")));
+static StaticQueue_t xTxQueueBuffer __attribute__((section(".dtcmram")));
 
 /* ──────────────────────── Network Helpers ──────────────────────────── */
 
@@ -129,7 +137,7 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
     if (idx >= BRIDGE_TOPIC_COUNT) return;
 
     const bridge_topic_t *t = &g_bridge_topics[idx];
-    topic_runtime_t *rt = &g_engine.runtimes[idx];
+    topic_runtime_t *rt = &g_runtimes[idx];
     if (t->deserialize_fn == NULL) return;
 
     /* 1. Deserialize CDR payload into stack struct */
@@ -164,7 +172,7 @@ static void bridge_can_to_zenoh_task(void const *argument) {
     while (!g_engine.zenoh_ready) {
         osDelay(50);
     }
-    printf("[Bridge] Universal CAN->Zenoh worker running\r\n");
+    printf("[Bridge] Universal CAN->Zenoh worker running (DTCM-RAM)\r\n");
 
     QueueHandle_t rx_q = can_bridge_get_rx_queue();
     can_frame_t frame;
@@ -181,7 +189,7 @@ static void bridge_can_to_zenoh_task(void const *argument) {
         for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
             const bridge_topic_t *t = &g_bridge_topics[i];
             if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
-            topic_runtime_t *rt = &g_engine.runtimes[i];
+            topic_runtime_t *rt = &g_runtimes[i];
 
             if (frame.id >= t->can_base_id && frame.id < (t->can_base_id + rt->num_frames)) {
                 uint8_t frame_idx = (uint8_t)(frame.id - t->can_base_id);
@@ -208,6 +216,7 @@ static void bridge_can_to_zenoh_task(void const *argument) {
                 /* When all frames arrive, serialize to CDR and publish! */
                 if (rt->received_mask == rt->expected_mask) {
                     rt->received_mask = 0;
+                    rt->rx_msg_count++;
 
                     if (t->serialize_fn != NULL) {
                         ucdrBuffer ub;
@@ -244,22 +253,66 @@ static void bridge_can_tx_task(void const *argument) {
     }
 }
 
-/* ──────────────────────── Diagnostic Stats Task ────────────────────── */
+/* ──────────────────────── Diagnostic & Watchdog Task ───────────────── */
+
+static const char *lec_to_str(uint8_t lec) {
+    switch (lec) {
+        case 0: return "None";
+        case 1: return "Stuff";
+        case 2: return "Form";
+        case 3: return "Ack";
+        case 4: return "BitRecessive";
+        case 5: return "BitDominant";
+        case 6: return "CRC";
+        default: return "Set";
+    }
+}
 
 static void stats_task(void const *argument) {
     (void)argument;
 
     for (;;) {
-        osDelay(5000);
+        osDelay(3000);
         if (g_engine.zenoh_ready) {
             uint32_t rx_frames, tx_frames, drop_cnt;
             can_bridge_get_stats(&rx_frames, &tx_frames, &drop_cnt);
-            printf("[Bridge Stats] CAN->ROS: %lu msgs | ROS->CAN: %lu msgs | CAN_RX: %lu | CAN_TX: %lu | DROP: %lu\r\n",
+
+            can_bus_health_t health;
+            can_bridge_get_bus_health(&health);
+
+            uint32_t now = HAL_GetTick();
+            bool has_timeout_error = false;
+
+            /* Check per-topic watchdog (Heartbeat check) */
+            for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+                const bridge_topic_t *t = &g_bridge_topics[i];
+                if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+                topic_runtime_t *rt = &g_runtimes[i];
+
+                /* If active topic has received nothing for > 1500ms */
+                if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > 1500) {
+                    printf("[WATCHDOG WARN] Topic /%s timeout! (last seen %lu ms ago)\r\n",
+                           t->topic_name, (unsigned long)(now - rt->last_recv_tick));
+                    has_timeout_error = true;
+                }
+            }
+
+            /* Red LED (LD3) alerts if bus error or topic timeout detected */
+            if (health.is_bus_off || health.is_passive || has_timeout_error) {
+                HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+            } else {
+                HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+            }
+
+            printf("[CAN Health] TEC:%u REC:%u LEC:%s | BOFF:%d PASS:%d WARN:%d | DROP:%lu\r\n",
+                   health.tec, health.rec, lec_to_str(health.lec),
+                   health.is_bus_off, health.is_passive, health.is_warning,
+                   (unsigned long)drop_cnt);
+            printf("[Bridge Stats] CAN->ROS: %lu msgs | ROS->CAN: %lu msgs | Raw RX:%lu TX:%lu\r\n",
                    (unsigned long)g_engine.can_to_zenoh_count,
                    (unsigned long)g_engine.zenoh_to_can_count,
                    (unsigned long)rx_frames,
-                   (unsigned long)tx_frames,
-                   (unsigned long)drop_cnt);
+                   (unsigned long)tx_frames);
         }
     }
 }
@@ -270,15 +323,29 @@ static void zenoh_task(void const *argument) {
     (void)argument;
 
     printf("\r\n==================================================\r\n");
-    printf("  STM32F767ZI High-Performance Zenoh-CAN Bridge   \r\n");
+    printf("  STM32F767ZI Ultimate Zenoh-CAN Bridge Engine    \r\n");
     printf("==================================================\r\n");
 
     /* 1. Wait for Ethernet link & IP */
     wait_for_network();
 
-    /* 2. Initialize CAN hardware (500 kbps, PB8/PB9) */
-    can_bridge_init();
-    printf("[CAN] Hardware initialized @ 500 kbps\r\n");
+    /* 2. Build Hardware Acceptance Filter List from master table */
+    uint32_t filter_ids[56];
+    size_t filter_id_count = 0;
+
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        const bridge_topic_t *t = &g_bridge_topics[i];
+        if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+
+        uint8_t n_frames = (uint8_t)((t->msg_size + 7) / 8);
+        for (uint8_t f = 0; f < n_frames && filter_id_count < 56; f++) {
+            filter_ids[filter_id_count++] = t->can_base_id + f;
+        }
+    }
+
+    /* Initialize CAN hardware with exact hardware filter list */
+    can_bridge_init(filter_ids, filter_id_count);
+    printf("[CAN] HW Filter active: %u IDs whitelisted in 16-bit list mode\r\n", (unsigned int)filter_id_count);
 
     /* 3. Open Zenoh Session */
     z_owned_config_t config;
@@ -306,12 +373,13 @@ static void zenoh_task(void const *argument) {
     printf("[Bridge] Registering topics from Master Routing Table:\r\n");
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
-        topic_runtime_t *rt = &g_engine.runtimes[i];
+        topic_runtime_t *rt = &g_runtimes[i];
 
-        rt->num_frames    = (uint8_t)((t->msg_size + 7) / 8);
-        rt->expected_mask = (uint16_t)((1U << rt->num_frames) - 1U);
-        rt->received_mask = 0;
+        rt->num_frames     = (uint8_t)((t->msg_size + 7) / 8);
+        rt->expected_mask  = (uint16_t)((1U << rt->num_frames) - 1U);
+        rt->received_mask  = 0;
         rt->last_recv_tick = 0;
+        rt->rx_msg_count   = 0;
 
         if (t->dir == BRIDGE_DIR_CAN_TO_ROS) {
             if (zenoh_ros2_pub_create(&rt->pub, &g_engine.node, t->topic_name, t->dds_type, t->type_hash)) {
@@ -339,7 +407,7 @@ static void zenoh_task(void const *argument) {
 
     /* 7. Signal all workers ready! */
     g_engine.zenoh_ready = true;
-    printf("[Bridge] All systems GO! Zero-boilerplate bridge active.\r\n");
+    printf("[Bridge] All systems GO! Deterministic DTCM-backed bridge active.\r\n");
 
     for (;;) {
         osDelay(10000);
@@ -350,8 +418,13 @@ static void zenoh_task(void const *argument) {
 
 void app_zenoh_start(void) {
     memset(&g_engine, 0, sizeof(g_engine));
+    memset(g_runtimes, 0, sizeof(g_runtimes));
 
-    g_engine.can_tx_queue = xQueueCreate(CAN_BRIDGE_TX_QUEUE_SIZE, sizeof(can_frame_t));
+    /* Static TX queue placed in DTCM-RAM */
+    g_engine.can_tx_queue = xQueueCreateStatic(CAN_BRIDGE_TX_QUEUE_SIZE,
+                                               sizeof(can_frame_t),
+                                               ucTxQueueStorage,
+                                               &xTxQueueBuffer);
     configASSERT(g_engine.can_tx_queue != NULL);
 
     /* Zenoh Management Task */
@@ -366,7 +439,7 @@ void app_zenoh_start(void) {
     osThreadDef(canTxTask, bridge_can_tx_task, osPriorityAboveNormal, 0, CAN_TX_TASK_STACK_SIZE);
     osThreadCreate(osThread(canTxTask), NULL);
 
-    /* Diagnostic Stats Task */
+    /* Diagnostic & Heartbeat Watchdog Task */
     osThreadDef(statsTask, stats_task, osPriorityLow, 0, 256);
     osThreadCreate(osThread(statsTask), NULL);
 }

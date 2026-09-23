@@ -237,6 +237,16 @@ SECTIONS
     *(.TxDescripSection)
   } >RAM
 
+  /* Zero-wait state DTCM-RAM for deterministic, jitter-free buffer operations */
+  .dtcmram (NOLOAD) : ALIGN(4)
+  {
+    _sdtcmram = .;
+    *(.dtcmram)
+    *(.dtcmram*)
+    . = ALIGN(4);
+    _edtcmram = .;
+  } >DTCMRAM
+
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack (NOLOAD) :
   {
