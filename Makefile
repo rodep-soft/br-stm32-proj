@@ -251,6 +251,7 @@ do-test:
 	@cmake -B $(TEST_BUILD) -S $(TEST_DIR) -G Ninja
 	@cmake --build $(TEST_BUILD)
 	@./$(TEST_BUILD)/test_serialization
+	@./$(TEST_BUILD)/test_bridge_engine
 
 ## -----------------------------------------------------------------------------
 ## Clean Target
