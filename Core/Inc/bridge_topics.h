@@ -22,6 +22,7 @@
 #include "generated/MotorStatus.h"
 #include "generated/ImuData.h"
 #include "generated/MotorCommand.h"
+#include "generated/Frame.h"
 
 typedef bool (*cdr_serialize_fn_t)(ucdrBuffer *ub, const void *topic);
 typedef bool (*cdr_deserialize_fn_t)(ucdrBuffer *ub, void *topic);

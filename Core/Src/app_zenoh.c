@@ -4,6 +4,7 @@
  *
  * Professional Architecture:
  * - Table-driven design: Zero hardcoded topics. Topics are declared in bridge_topics.h.
+ * - Centralized config: Network and ROS2 parameters loaded from app_config.h.
  * - Hardware acceptance filtering: Auto-generates exact match ID list from table.
  * - Deterministic DTCM-RAM buffers: Zero cache-miss jitter on Cortex-M7.
  * - Comprehensive diagnostics: CAN bus health (TEC, REC, LEC) + per-topic heartbeat watchdog.
@@ -24,25 +25,10 @@
 #include <zenoh-pico.h>
 #include "zenoh_ros2.h"
 #include "can_bridge.h"
+#include "app_config.h"
 #include "bridge_topics.h"
 
 extern struct netif gnetif;
-
-/* ─────────────────────────── Network Settings ──────────────────────── */
-
-#define ZENOH_MODE "client"
-
-static const char *const ZENOH_LOCATORS[] = {
-    "udp/192.168.50.30:7447",
-    "udp/192.168.50.10:7447",
-    "udp/192.168.50.50:7447",
-    "udp/192.168.50.150:7447",
-};
-#define ZENOH_LOCATOR_COUNT (sizeof(ZENOH_LOCATORS) / sizeof(ZENOH_LOCATORS[0]))
-
-#define ROS2_NODE_NAME    "stm32_bridge"
-#define ROS2_NODE_NS      "/"
-#define ROS2_DOMAIN_ID    0
 
 #define ZENOH_TASK_STACK_SIZE   2048
 #define BRIDGE_TASK_STACK_SIZE  1024
@@ -83,11 +69,11 @@ static StaticQueue_t xTxQueueBuffer __attribute__((section(".dtcmram")));
 
 static void init_zenoh_config(z_owned_config_t *config) {
     z_config_default(config);
-    zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, ZENOH_MODE);
+    zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
 
-    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
-        if (ZENOH_LOCATORS[i] != NULL && strlen(ZENOH_LOCATORS[i]) > 0) {
-            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, ZENOH_LOCATORS[i]);
+    for (size_t i = 0; i < CONFIG_ZENOH_LOCATOR_COUNT; i++) {
+        if (CONFIG_ZENOH_LOCATORS[i] != NULL && strlen(CONFIG_ZENOH_LOCATORS[i]) > 0) {
+            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, CONFIG_ZENOH_LOCATORS[i]);
         }
     }
 }
@@ -113,12 +99,12 @@ static void wait_for_network(void) {
         }
 
         if (wait_sec >= 10 && gnetif.ip_addr.addr == 0) {
-            printf("[ETH] DHCP timeout! Falling back to static IP 192.168.50.77...\r\n");
+            printf("[ETH] DHCP timeout! Falling back to static IP %s...\r\n", CONFIG_STATIC_IP);
             dhcp_stop(&gnetif);
             ip4_addr_t static_ip, static_mask, static_gw;
-            IP4_ADDR(&static_ip, 192, 168, 50, 77);
-            IP4_ADDR(&static_mask, 255, 255, 255, 0);
-            IP4_ADDR(&static_gw, 192, 168, 50, 1);
+            ip4addr_aton(CONFIG_STATIC_IP, &static_ip);
+            ip4addr_aton(CONFIG_STATIC_NETMASK, &static_mask);
+            ip4addr_aton(CONFIG_STATIC_GATEWAY, &static_gw);
             netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
             netif_set_up(&gnetif);
             break;
@@ -272,7 +258,7 @@ static void stats_task(void const *argument) {
     (void)argument;
 
     for (;;) {
-        osDelay(3000);
+        osDelay(CONFIG_CAN_STATS_PERIOD_MS);
         if (g_engine.zenoh_ready) {
             uint32_t rx_frames, tx_frames, drop_cnt;
             can_bridge_get_stats(&rx_frames, &tx_frames, &drop_cnt);
@@ -289,8 +275,8 @@ static void stats_task(void const *argument) {
                 if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
                 topic_runtime_t *rt = &g_runtimes[i];
 
-                /* If active topic has received nothing for > 1500ms */
-                if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > 1500) {
+                /* If active topic has received nothing for watchdog timeout */
+                if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_TIMEOUT_MS) {
                     printf("[WATCHDOG WARN] Topic /%s timeout! (last seen %lu ms ago)\r\n",
                            t->topic_name, (unsigned long)(now - rt->last_recv_tick));
                     has_timeout_error = true;
@@ -350,7 +336,7 @@ static void zenoh_task(void const *argument) {
     /* 3. Open Zenoh Session */
     z_owned_config_t config;
     init_zenoh_config(&config);
-    printf("[Zenoh] Connecting in %s mode...\r\n", ZENOH_MODE);
+    printf("[Zenoh] Connecting in %s mode...\r\n", CONFIG_ZENOH_MODE);
 
     z_result_t res;
     while ((res = z_open(&g_engine.session, z_move(config), NULL)) < 0) {
@@ -362,7 +348,7 @@ static void zenoh_task(void const *argument) {
 
     /* 4. Initialize ROS 2 Node */
     if (!zenoh_ros2_node_init(&g_engine.node, &g_engine.session,
-                              ROS2_NODE_NAME, ROS2_NODE_NS, ROS2_DOMAIN_ID)) {
+                              CONFIG_ROS2_NODE_NAME, CONFIG_ROS2_NODE_NS, CONFIG_ROS2_DOMAIN_ID)) {
         printf("[ROS2] Node initialization failed!\r\n");
         z_drop(z_move(g_engine.session));
         vTaskDelete(NULL);
