@@ -17,13 +17,14 @@
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "stm32f7xx_hal.h"
+#include "app_config.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define CAN_BRIDGE_RX_QUEUE_SIZE 64
-#define CAN_BRIDGE_TX_QUEUE_SIZE 32
+#define CAN_BRIDGE_RX_QUEUE_SIZE CONFIG_QUEUE_CAN_RX_DEPTH
+#define CAN_BRIDGE_TX_QUEUE_SIZE CONFIG_QUEUE_CAN_TX_DEPTH
 
 /**
  * @brief Standard CAN 2.0B frame representation

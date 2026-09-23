@@ -97,12 +97,11 @@ void can_bridge_init(const uint32_t *filter_ids, size_t filter_id_count) {
     }
 
     /*
-     * Bit Timing: 500 kbps @ 48 MHz APB1 clock
-     * Bit time = 6 * (1 + 13 + 2) / 48 MHz = 2 us -> 500 kbps
-     * Sample point = 14 / 16 = 87.5%
+     * Bit Timing: derived automatically from CONFIG_CAN_BITRATE in app_config.h
+     * APB1 clock = 48 MHz, Sample point = 14 / 16 = 87.5%
      */
     hcan1.Instance                  = CAN1;
-    hcan1.Init.Prescaler            = 6;
+    hcan1.Init.Prescaler            = CONFIG_CAN_PRESCALER;
     hcan1.Init.Mode                 = CAN_MODE_NORMAL;
     hcan1.Init.SyncJumpWidth        = CAN_SJW_1TQ;
     hcan1.Init.TimeSeg1             = CAN_BS1_13TQ;

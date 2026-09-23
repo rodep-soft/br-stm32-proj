@@ -30,9 +30,10 @@
 
 extern struct netif gnetif;
 
-#define ZENOH_TASK_STACK_SIZE   2048
-#define BRIDGE_TASK_STACK_SIZE  1024
-#define CAN_TX_TASK_STACK_SIZE  512
+#define ZENOH_TASK_STACK_SIZE   CONFIG_STACK_ZENOH_TASK
+#define BRIDGE_TASK_STACK_SIZE  CONFIG_STACK_BRIDGE_TASK
+#define CAN_TX_TASK_STACK_SIZE  CONFIG_STACK_CAN_TX_TASK
+#define STATS_TASK_STACK_SIZE   CONFIG_STACK_STATS_TASK
 
 /* ──────────────────────── Topic Runtime State ──────────────────────── */
 
@@ -67,19 +68,37 @@ static StaticQueue_t xTxQueueBuffer __attribute__((section(".dtcmram")));
 
 /* ──────────────────────── Network Helpers ──────────────────────────── */
 
+static const char *const g_zenoh_locators[] = { CONFIG_ZENOH_LOCATOR_LIST };
+#define ZENOH_LOCATOR_COUNT (sizeof(g_zenoh_locators) / sizeof(g_zenoh_locators[0]))
+
 static void init_zenoh_config(z_owned_config_t *config) {
     z_config_default(config);
     zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
 
-    for (size_t i = 0; i < CONFIG_ZENOH_LOCATOR_COUNT; i++) {
-        if (CONFIG_ZENOH_LOCATORS[i] != NULL && strlen(CONFIG_ZENOH_LOCATORS[i]) > 0) {
-            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, CONFIG_ZENOH_LOCATORS[i]);
+    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
+        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
+            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
         }
     }
 }
 
 static void wait_for_network(void) {
-    printf("[ETH] Waiting for IP address...\r\n");
+#if (CONFIG_NET_USE_DHCP == 0)
+    /* Instant Static IP mode: bind IP immediately and skip DHCP entirely (< 1s boot) */
+    printf("[ETH] Instant Static IP mode: %s\r\n", CONFIG_NET_STATIC_IP);
+    ip4_addr_t static_ip, static_mask, static_gw;
+    ip4addr_aton(CONFIG_NET_STATIC_IP, &static_ip);
+    ip4addr_aton(CONFIG_NET_STATIC_NETMASK, &static_mask);
+    ip4addr_aton(CONFIG_NET_STATIC_GATEWAY, &static_gw);
+    netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
+    netif_set_up(&gnetif);
+
+    while (!netif_is_link_up(&gnetif)) {
+        osDelay(100);
+    }
+#else
+    /* DHCP mode with static IP fallback */
+    printf("[ETH] Waiting for DHCP lease (timeout: %ds)...\r\n", CONFIG_NET_DHCP_TIMEOUT_SEC);
     int wait_sec = 0;
     while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
         osDelay(1000);
@@ -98,19 +117,20 @@ static void wait_for_network(void) {
             dhcp_start(&gnetif);
         }
 
-        if (wait_sec >= 10 && gnetif.ip_addr.addr == 0) {
-            printf("[ETH] DHCP timeout! Falling back to static IP %s...\r\n", CONFIG_STATIC_IP);
+        if (wait_sec >= CONFIG_NET_DHCP_TIMEOUT_SEC && gnetif.ip_addr.addr == 0) {
+            printf("[ETH] DHCP timeout! Falling back to static IP %s...\r\n", CONFIG_NET_STATIC_IP);
             dhcp_stop(&gnetif);
             ip4_addr_t static_ip, static_mask, static_gw;
-            ip4addr_aton(CONFIG_STATIC_IP, &static_ip);
-            ip4addr_aton(CONFIG_STATIC_NETMASK, &static_mask);
-            ip4addr_aton(CONFIG_STATIC_GATEWAY, &static_gw);
+            ip4addr_aton(CONFIG_NET_STATIC_IP, &static_ip);
+            ip4addr_aton(CONFIG_NET_STATIC_NETMASK, &static_mask);
+            ip4addr_aton(CONFIG_NET_STATIC_GATEWAY, &static_gw);
             netif_set_addr(&gnetif, &static_ip, &static_mask, &static_gw);
             netif_set_up(&gnetif);
             break;
         }
     }
-    printf("[ETH] IP: %s  Mask: %s  GW: %s\r\n",
+#endif
+    printf("[ETH] Link UP! IP: %s  Mask: %s  GW: %s\r\n",
            ip4addr_ntoa(&gnetif.ip_addr),
            ip4addr_ntoa(&gnetif.netmask),
            ip4addr_ntoa(&gnetif.gw));
@@ -180,8 +200,8 @@ static void bridge_can_to_zenoh_task(void const *argument) {
             if (frame.id >= t->can_base_id && frame.id < (t->can_base_id + rt->num_frames)) {
                 uint8_t frame_idx = (uint8_t)(frame.id - t->can_base_id);
 
-                /* Desynchronization guard: 100ms timeout resets stale partial frames */
-                if (rt->received_mask != 0 && (now - rt->last_recv_tick) > 100) {
+                /* Desynchronization guard: timeout resets stale partial frames */
+                if (rt->received_mask != 0 && (now - rt->last_recv_tick) > CONFIG_CAN_FRAME_TIMEOUT_MS) {
                     rt->received_mask = 0;
                 }
                 rt->last_recv_tick = now;
@@ -234,7 +254,7 @@ static void bridge_can_tx_task(void const *argument) {
     can_frame_t frame;
     for (;;) {
         if (xQueueReceive(g_engine.can_tx_queue, &frame, portMAX_DELAY) == pdTRUE) {
-            can_bridge_send_frame(&frame, pdMS_TO_TICKS(10));
+            can_bridge_send_frame(&frame, pdMS_TO_TICKS(CONFIG_CAN_TX_TIMEOUT_MS));
         }
     }
 }
@@ -276,7 +296,7 @@ static void stats_task(void const *argument) {
                 topic_runtime_t *rt = &g_runtimes[i];
 
                 /* If active topic has received nothing for watchdog timeout */
-                if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_TIMEOUT_MS) {
+                if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_MS) {
                     printf("[WATCHDOG WARN] Topic /%s timeout! (last seen %lu ms ago)\r\n",
                            t->topic_name, (unsigned long)(now - rt->last_recv_tick));
                     has_timeout_error = true;
@@ -426,6 +446,6 @@ void app_zenoh_start(void) {
     osThreadCreate(osThread(canTxTask), NULL);
 
     /* Diagnostic & Heartbeat Watchdog Task */
-    osThreadDef(statsTask, stats_task, osPriorityLow, 0, 256);
+    osThreadDef(statsTask, stats_task, osPriorityLow, 0, STATS_TASK_STACK_SIZE);
     osThreadCreate(osThread(statsTask), NULL);
 }
