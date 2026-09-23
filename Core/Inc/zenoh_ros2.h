@@ -155,16 +155,6 @@ bool zenoh_ros2_sub_create(zenoh_ros2_sub_t *sub, zenoh_ros2_node_t *node,
  */
 void zenoh_ros2_sub_destroy(zenoh_ros2_sub_t *sub);
 
-/**
- * @brief Helper to serialize a standard ROS 2 std_msgs/msg/String into CDR format.
- */
-size_t zenoh_ros2_serialize_string(uint8_t *dst, size_t dst_max, const char *str);
-
-/**
- * @brief Helper to deserialize a standard ROS 2 std_msgs/msg/String from CDR format.
- */
-bool zenoh_ros2_deserialize_string(const uint8_t *src, size_t src_len, char *dst, size_t dst_max);
-
 #ifdef __cplusplus
 }
 #endif
