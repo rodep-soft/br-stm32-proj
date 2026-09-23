@@ -61,10 +61,10 @@ extern "C" {
  * 3. CAN Hardware & Bitrate Configuration
  * ============================================================================== */
 /**
- * Supported Bitrates: 1000000 (1M), 500000 (500k), 250000 (250k), 125000 (125k)
+ * Supported Bitrates: 1000000 (1M), 500000 (500k - DEFAULT), 250000 (250k), 125000 (125k)
  * Sample point is fixed at automotive-optimal 87.5% (16 TQ).
  */
-#define CONFIG_CAN_BITRATE            500000U
+#define CONFIG_CAN_BITRATE            500000U  /**< Default: 500 kbps (Standard for robotics) */
 
 /* Timing & Diagnostic Watchdogs */
 #define CONFIG_CAN_STATS_PERIOD_MS    3000   /**< Diagnostics log interval */
