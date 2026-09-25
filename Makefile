@@ -133,7 +133,7 @@ dev shell:
 
 msg:
 	@echo "==> [CodeGen] Generating Micro-CDR headers from .msg files..."
-	@$(PYTHON) $(CODEGEN) --package can_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
+	@$(PYTHON) $(CODEGEN) --package robot_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
 
 ## -----------------------------------------------------------------------------
 ## Build Targets (Auto-delegates to Nix if tools not in PATH)
@@ -251,6 +251,7 @@ do-test:
 	@cmake -B $(TEST_BUILD) -S $(TEST_DIR) -G Ninja
 	@cmake --build $(TEST_BUILD)
 	@./$(TEST_BUILD)/test_serialization
+	@./$(TEST_BUILD)/test_bridge_engine
 
 ## -----------------------------------------------------------------------------
 ## Clean Target

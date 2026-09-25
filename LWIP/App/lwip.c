@@ -30,7 +30,6 @@
 /* USER CODE BEGIN 0 */
 #include "lwip/dhcp.h"
 #include <stdio.h>
-#include "app_config.h"
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
 static void ethernet_link_status_updated(struct netif *netif);
@@ -59,10 +58,10 @@ void MX_LWIP_Init(void)
   /* Initialize the LwIP stack with RTOS */
   tcpip_init( NULL, NULL );
 
-  /* IP addresses initialization with Static IP (IPv4) */
-  ip4addr_aton(CONFIG_STATIC_IP, &ipaddr);
-  ip4addr_aton(CONFIG_STATIC_NETMASK, &netmask);
-  ip4addr_aton(CONFIG_STATIC_GATEWAY, &gw);
+  /* IP addresses initialization with DHCP (IPv4) */
+  ipaddr.addr = 0;
+  netmask.addr = 0;
+  gw.addr = 0;
 
   /* add the network interface (IPv4/IPv6) with RTOS */
   netif_add(&gnetif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init, &tcpip_input);
@@ -82,8 +81,8 @@ void MX_LWIP_Init(void)
   osThreadCreate (osThread(EthLink), &gnetif);
 /* USER CODE END H7_OS_THREAD_DEF_CREATE_CMSIS_RTOS_V1 */
 
-  /* DHCP disabled: Static IP is used for robot reliability */
-  /* dhcp_start(&gnetif); */
+  /* Start DHCP negotiation for a network interface (IPv4) */
+  dhcp_start(&gnetif);
 
 /* USER CODE BEGIN 3 */
 

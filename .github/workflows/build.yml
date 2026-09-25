@@ -36,7 +36,7 @@ jobs:
 
       - name: Generate ROS 2 message headers
         run: |
-          python3 tools/msg2cdr.py --package can_msgs --msg-dir test_msgs/msg --out-dir Core/Inc/generated
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir test_msgs/msg --out-dir Core/Inc/generated
 
       - name: Build and Run Host Unit Tests
         run: |

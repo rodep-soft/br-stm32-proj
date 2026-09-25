@@ -374,11 +374,8 @@ void StartDefaultTask(void const * argument)
   MX_LWIP_Init();
   /* USER CODE BEGIN 5 */
   app_zenoh_start();
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1000);
-  }
+  /* Delete this initialization task to reclaim its stack memory */
+  vTaskDelete(NULL);
   /* USER CODE END 5 */
 }
 

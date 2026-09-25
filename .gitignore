@@ -28,6 +28,8 @@ compile_commands.json
 *~
 .DS_Store
 
+# Generated headers
+Core/Inc/generated/
 
 # Python
 __pycache__/
