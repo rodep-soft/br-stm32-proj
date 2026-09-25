@@ -230,6 +230,9 @@ router zenohd:
 sub zenoh-sub: python-deps
 	@$(PYTHON) tools/zenoh_sub.py $(ARGS)
 
+test-comm: python-deps
+	@$(PYTHON) tools/test_zenoh_comm.py
+
 ## -----------------------------------------------------------------------------
 ## Host Unit Testing
 ## -----------------------------------------------------------------------------

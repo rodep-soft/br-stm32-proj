@@ -30,6 +30,7 @@
 /* USER CODE BEGIN 0 */
 #include "lwip/dhcp.h"
 #include <stdio.h>
+#include "app_config.h"
 /* USER CODE END 0 */
 /* Private function prototypes -----------------------------------------------*/
 static void ethernet_link_status_updated(struct netif *netif);
@@ -58,10 +59,17 @@ void MX_LWIP_Init(void)
   /* Initialize the LwIP stack with RTOS */
   tcpip_init( NULL, NULL );
 
+#if (CONFIG_NET_USE_DHCP == 0)
+  /* IP addresses initialization with Static IP (IPv4) */
+  ip4addr_aton(CONFIG_NET_STATIC_IP, &ipaddr);
+  ip4addr_aton(CONFIG_NET_STATIC_NETMASK, &netmask);
+  ip4addr_aton(CONFIG_NET_STATIC_GATEWAY, &gw);
+#else
   /* IP addresses initialization with DHCP (IPv4) */
   ipaddr.addr = 0;
   netmask.addr = 0;
   gw.addr = 0;
+#endif
 
   /* add the network interface (IPv4/IPv6) with RTOS */
   netif_add(&gnetif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init, &tcpip_input);
@@ -81,8 +89,10 @@ void MX_LWIP_Init(void)
   osThreadCreate (osThread(EthLink), &gnetif);
 /* USER CODE END H7_OS_THREAD_DEF_CREATE_CMSIS_RTOS_V1 */
 
+#if (CONFIG_NET_USE_DHCP != 0)
   /* Start DHCP negotiation for a network interface (IPv4) */
   dhcp_start(&gnetif);
+#endif
 
 /* USER CODE BEGIN 3 */
 
@@ -106,15 +116,21 @@ static void ethernet_link_status_updated(struct netif *netif)
   if (netif_is_link_up(netif))
   {
 /* USER CODE BEGIN 5 */
+#if (CONFIG_NET_USE_DHCP != 0)
     printf("[ETH] Link is UP! Starting DHCP...\r\n");
     dhcp_start(netif);
+#else
+    printf("[ETH] Link is UP! Static IP active: %s\r\n", CONFIG_NET_STATIC_IP);
+#endif
 /* USER CODE END 5 */
   }
   else /* netif is down */
   {
 /* USER CODE BEGIN 6 */
     printf("[ETH] Link is DOWN.\r\n");
+#if (CONFIG_NET_USE_DHCP != 0)
     dhcp_stop(netif);
+#endif
 /* USER CODE END 6 */
   }
 }
