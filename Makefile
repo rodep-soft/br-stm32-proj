@@ -90,6 +90,7 @@ python-deps:
 	fi
 
 # Install ST-LINK udev rules to allow flashing without sudo
+# NOTE:ファイル経由でinstallしたほうが良さそう
 udev:
 	@if [ "$$(uname -s)" = "Linux" ]; then \
 		if [ -f /etc/NIXOS ]; then \

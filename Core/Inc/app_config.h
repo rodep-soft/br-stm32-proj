@@ -30,9 +30,13 @@ extern "C" {
 /* ==============================================================================
  * 1. Network (Ethernet) Settings
  * ============================================================================== */
+// DHCPはなるべく使わないこと
 #define CONFIG_NET_USE_DHCP           0  /**< 0: Instant static IP (< 1s boot), 1: DHCP fallback */
+// stm32の静的(static)IP
 #define CONFIG_NET_STATIC_IP          "192.168.50.77"
 #define CONFIG_NET_STATIC_NETMASK     "255.255.255.0"
+
+// これは部室用
 #define CONFIG_NET_STATIC_GATEWAY     "192.168.50.1"
 #define CONFIG_NET_DHCP_TIMEOUT_SEC   5
 
@@ -41,6 +45,8 @@ extern "C" {
  * ============================================================================== */
 #define CONFIG_ZENOH_MODE             "client"
 
+// 接続先IPアドレス
+// udpを使うこと!
 #define CONFIG_ZENOH_LOCATOR_LIST \
     "udp/192.168.50.30:7447", \
     "udp/192.168.50.10:7447", \
@@ -54,6 +60,8 @@ extern "C" {
 /* ==============================================================================
  * 3. CAN Bus Settings
  * ============================================================================== */
+
+// baudrateは合わせる
 #define CONFIG_CAN_BITRATE            500000U  /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
 #define CONFIG_CAN_STATS_PERIOD_MS    3000     /**< Diagnostics reporting interval */
 #define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
@@ -124,8 +132,11 @@ typedef struct {
     }
 
 /**
- * 🌟 MASTER TOPIC TABLE: Add your sensors and actuators here!
+ * MASTER TOPIC TABLE: Add your sensors and actuators here!
  */
+
+// ここにデータ送受信を定義
+// can <--> ros2の方向に注意
 static const bridge_topic_t g_bridge_topics[] = {
     /* 1. CAN -> ROS 2: MotorStatus (28B = 4 CAN frames: 0x100..0x103) */
     BRIDGE_CAN_TO_ROS("motor_status",  MotorStatus,  0x100),
