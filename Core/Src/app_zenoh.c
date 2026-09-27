@@ -154,6 +154,7 @@ static void can_hardware_init(void) {
 
     HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 6, 0);
     HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
+    printf("[CAN] HW Filter & Bitrate configured (%lu bps)\r\n", (unsigned long)CONFIG_CAN_BITRATE);
 }
 
 /* Direct thread-safe CAN transmission */
@@ -231,7 +232,11 @@ static void wait_for_network(void) {
     netif_set_addr(&gnetif, &ip, &mask, &gw);
     netif_set_up(&gnetif);
 
+    uint32_t wait_count = 0;
     while (!netif_is_link_up(&gnetif)) {
+        if (wait_count++ % 30 == 0) {
+            printf("[ETH] Waiting for Ethernet cable link (plug in cable to connect Zenoh)...\r\n");
+        }
         osDelay(100);
     }
 #else
@@ -300,6 +305,10 @@ static void bridge_worker_task(void const *arg) {
     uint8_t cdr_buf[256];
 
     for (;;) {
+        if (g_rx_queue == NULL) {
+            osDelay(10);
+            continue;
+        }
         if (xQueueReceive(g_rx_queue, &frame, portMAX_DELAY) != pdTRUE) continue;
 
         uint32_t now = HAL_GetTick();
@@ -381,8 +390,6 @@ static void zenoh_engine_task(void const *arg) {
     printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
     printf("==================================================\r\n");
 
-    can_hardware_init();
-    printf("[CAN] HW Filter & Bitrate configured (%lu bps)\r\n", (unsigned long)CONFIG_CAN_BITRATE);
     wait_for_network();
 
     /* Open Zenoh session */
@@ -486,6 +493,9 @@ static void zenoh_engine_task(void const *arg) {
 void app_zenoh_start(void) {
     memset(&g_bridge, 0, sizeof(g_bridge));
     memset(g_runtimes, 0, sizeof(g_runtimes));
+
+    /* Initialize CAN hardware & queues BEFORE creating tasks to prevent NULL queue asserts */
+    can_hardware_init();
 
     /* 1. Zenoh Manager + Diagnostics Loop (Single task) */
     osThreadDef(zenohTask, zenoh_engine_task, osPriorityNormal, 0, CONFIG_STACK_ZENOH_TASK);
