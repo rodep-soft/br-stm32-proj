@@ -135,8 +135,9 @@ bool zenoh_ros2_pub_create(zenoh_ros2_pub_t *pub, zenoh_ros2_node_t *node,
     z_view_keyexpr_t token_ke;
     z_view_keyexpr_from_str_unchecked(&token_ke, token_ke_str);
 
-    if (z_liveliness_declare_token(z_loan(*node->session), &pub->token, z_loan(token_ke), NULL) < 0) {
-        printf("[ROS2] Error: failed to declare publisher liveliness token (%s)\r\n", token_ke_str);
+    z_result_t res = z_liveliness_declare_token(z_loan(*node->session), &pub->token, z_loan(token_ke), NULL);
+    if (res < 0) {
+        printf("[ROS2] Error (%d): failed to declare publisher liveliness token (%s)\r\n", (int)res, token_ke_str);
         return false;
     }
 
@@ -152,8 +153,9 @@ bool zenoh_ros2_pub_create(zenoh_ros2_pub_t *pub, zenoh_ros2_node_t *node,
     z_view_keyexpr_t data_ke;
     z_view_keyexpr_from_str_unchecked(&data_ke, data_ke_str);
 
-    if (z_declare_publisher(z_loan(*node->session), &pub->pub, z_loan(data_ke), NULL) < 0) {
-        printf("[ROS2] Error: failed to declare publisher for key (%s)\r\n", data_ke_str);
+    res = z_declare_publisher(z_loan(*node->session), &pub->pub, z_loan(data_ke), NULL);
+    if (res < 0) {
+        printf("[ROS2] Error (%d): failed to declare publisher for key (%s)\r\n", (int)res, data_ke_str);
         z_drop(z_move(pub->token));
         return false;
     }
@@ -264,8 +266,9 @@ bool zenoh_ros2_sub_create(zenoh_ros2_sub_t *sub, zenoh_ros2_node_t *node,
     z_view_keyexpr_t token_ke;
     z_view_keyexpr_from_str_unchecked(&token_ke, token_ke_str);
 
-    if (z_liveliness_declare_token(z_loan(*node->session), &sub->token, z_loan(token_ke), NULL) < 0) {
-        printf("[ROS2] Error: failed to declare subscriber liveliness token (%s)\r\n", token_ke_str);
+    z_result_t res = z_liveliness_declare_token(z_loan(*node->session), &sub->token, z_loan(token_ke), NULL);
+    if (res < 0) {
+        printf("[ROS2] Error (%d): failed to declare subscriber liveliness token (%s)\r\n", (int)res, token_ke_str);
         return false;
     }
 
@@ -284,8 +287,9 @@ bool zenoh_ros2_sub_create(zenoh_ros2_sub_t *sub, zenoh_ros2_node_t *node,
     z_owned_closure_sample_t callback;
     z_closure_sample(&callback, subscriber_trampoline, NULL, sub);
 
-    if (z_declare_subscriber(z_loan(*node->session), &sub->sub, z_loan(data_ke), z_move(callback), NULL) < 0) {
-        printf("[ROS2] Error: failed to declare subscriber for key (%s)\r\n", data_ke_str);
+    res = z_declare_subscriber(z_loan(*node->session), &sub->sub, z_loan(data_ke), z_move(callback), NULL);
+    if (res < 0) {
+        printf("[ROS2] Error (%d): failed to declare subscriber for key (%s)\r\n", (int)res, data_ke_str);
         z_drop(z_move(sub->token));
         return false;
     }

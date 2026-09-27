@@ -97,6 +97,8 @@ typedef enum {
     BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
     BRIDGE_DIR_CAN_RECV,        /**< Standalone CAN Receiver: log to serial without PC/Zenoh */
     BRIDGE_DIR_CAN_ECHO = BRIDGE_DIR_CAN_RECV, /**< Alias for backward compatibility */
+    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< can_msgs/Frame (Subscribe) -> Direct CAN frame TX */
+    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> can_msgs/Frame (Publish) */
 } bridge_dir_t;
 
 typedef void (*msg_print_fn_t)(const void *topic);
@@ -154,6 +156,32 @@ typedef struct {
 
 #define BRIDGE_CAN_ECHO(topic, msg, rx_id, ...) BRIDGE_CAN_RECV(topic, msg, rx_id)
 
+#define BRIDGE_ROS_TO_CAN_FRAME(topic) \
+    { \
+        .topic_name     = topic, \
+        .dir            = BRIDGE_DIR_ROS_TO_CAN_RAW, \
+        .can_base_id    = 0, \
+        .msg_size       = sizeof(can_msgs_Frame), \
+        .dds_type       = can_msgs_Frame_DDS_TYPE, \
+        .type_hash      = can_msgs_Frame_TYPE_HASH, \
+        .serialize_fn   = NULL, \
+        .deserialize_fn = (cdr_deserialize_fn_t)can_msgs_Frame_deserialize, \
+        .print_fn       = (msg_print_fn_t)can_msgs_Frame_print, \
+    }
+
+#define BRIDGE_CAN_TO_ROS_FRAME(topic) \
+    { \
+        .topic_name     = topic, \
+        .dir            = BRIDGE_DIR_CAN_TO_ROS_RAW, \
+        .can_base_id    = 0, \
+        .msg_size       = sizeof(can_msgs_Frame), \
+        .dds_type       = can_msgs_Frame_DDS_TYPE, \
+        .type_hash      = can_msgs_Frame_TYPE_HASH, \
+        .serialize_fn   = (cdr_serialize_fn_t)can_msgs_Frame_serialize, \
+        .deserialize_fn = NULL, \
+        .print_fn       = (msg_print_fn_t)can_msgs_Frame_print, \
+    }
+
 /**
  * MASTER TOPIC TABLE: Add your sensors, actuators, and ping-pong devices here.
  */
@@ -173,11 +201,17 @@ static const bridge_topic_t g_bridge_topics[] = {
     /* 4. Standalone CAN Receiver: Ping (rx: 0x400) */
     BRIDGE_CAN_RECV("ping_echo",       Ping,         0x400),
     // 成功！
-    BRIDGE_CAN_TO_ROS("kokura_speak", Ping, 0x400),
+    BRIDGE_CAN_TO_ROS("kokura_speak",  Ping,         0x400),
+
+    /* 5. Robstride CAN Bridge: ROS 2 -> CAN (to_can_bus) */
+    BRIDGE_ROS_TO_CAN_FRAME("to_can_bus"),
+
+    /* 6. Robstride CAN Bridge: CAN -> ROS 2 (from_can_bus) */
+    BRIDGE_CAN_TO_ROS_FRAME("from_can_bus"),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))
-#define BRIDGE_MAX_MSG_SIZE 64
+#define BRIDGE_MAX_MSG_SIZE 128
 
 #ifdef __cplusplus
 }

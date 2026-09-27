@@ -319,7 +319,9 @@ static void test_hardware_filter_id_generation(void) {
 
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
-        if (t->dir == BRIDGE_DIR_ROS_TO_CAN) continue;
+        if (t->dir == BRIDGE_DIR_ROS_TO_CAN ||
+            t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW ||
+            t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) continue;
 
         if (t->dir == BRIDGE_DIR_CAN_RECV) {
             filter_ids[count++] = t->can_base_id;
@@ -459,6 +461,68 @@ static void test_can_receive_standalone(void) {
 }
 
 /* ==============================================================================
+ * Test 10: Robstride 29-bit Extended Frame Transparent Bridge
+ * ============================================================================== */
+static void test_robstride_raw_bridge(void) {
+    printf("[TEST] Running test_robstride_raw_bridge...\n");
+
+    /* 1. PC -> STM32 (to_can_bus): Robstride Enable Frame (Type 3, Host 0xFD, Motor 1) */
+    uint32_t enable_ext_id = (3U << 24) | (0xFDU << 8) | 1U;
+    can_msgs_Frame pc_cmd = {
+        .header = {.sec = 123456, .nanosec = 789000, .frame_id = "can1"},
+        .id = enable_ext_id,
+        .is_rtr = false,
+        .is_extended = true,
+        .is_error = false,
+        .dlc = 8,
+        .data = {0, 0, 0, 0, 0, 0, 0, 0},
+    };
+
+    uint8_t cdr_buf[128];
+    ucdrBuffer writer;
+    ucdr_init_buffer(&writer, cdr_buf, sizeof(cdr_buf));
+    ASSERT_TRUE(can_msgs_Frame_serialize(&writer, &pc_cmd));
+    size_t len = ucdr_buffer_length(&writer);
+
+    /* STM32 receives and deserializes */
+    can_msgs_Frame stm_rx;
+    memset(&stm_rx, 0, sizeof(stm_rx));
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, cdr_buf, len);
+    ASSERT_TRUE(can_msgs_Frame_deserialize(&reader, &stm_rx));
+    ASSERT_TRUE(stm_rx.id == enable_ext_id);
+    ASSERT_TRUE(stm_rx.is_extended == true);
+    ASSERT_TRUE(stm_rx.dlc == 8);
+
+    /* 2. Motor -> STM32 -> PC (from_can_bus): Robstride Feedback Frame (Type 2, Motor 1, Host 0xFD) */
+    uint16_t area = (2U << 14) | (0U << 8) | 1U; /* Mode: Run(2), Motor: 1 */
+    uint32_t fb_ext_id = (2U << 24) | ((uint32_t)area << 8) | 0xFDU;
+    uint8_t fb_data[8] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0x00, 0xFA}; /* pos, vel, torque, temp */
+
+    can_msgs_Frame stm_to_pc;
+    memset(&stm_to_pc, 0, sizeof(stm_to_pc));
+    stm_to_pc.id = fb_ext_id;
+    stm_to_pc.is_extended = true;
+    stm_to_pc.dlc = 8;
+    memcpy(stm_to_pc.data, fb_data, 8);
+
+    ucdr_init_buffer(&writer, cdr_buf, sizeof(cdr_buf));
+    ASSERT_TRUE(can_msgs_Frame_serialize(&writer, &stm_to_pc));
+    len = ucdr_buffer_length(&writer);
+
+    /* PC receives feedback */
+    can_msgs_Frame pc_rx;
+    memset(&pc_rx, 0, sizeof(pc_rx));
+    ucdr_init_buffer(&reader, cdr_buf, len);
+    ASSERT_TRUE(can_msgs_Frame_deserialize(&reader, &pc_rx));
+    ASSERT_TRUE(pc_rx.id == fb_ext_id);
+    ASSERT_TRUE(pc_rx.is_extended == true);
+    ASSERT_TRUE(memcmp(pc_rx.data, fb_data, 8) == 0);
+
+    printf("       test_robstride_raw_bridge: PASSED ✅\n");
+}
+
+/* ==============================================================================
  * Main Test Runner
  * ============================================================================== */
 int main(void) {
@@ -475,6 +539,7 @@ int main(void) {
     test_hardware_filter_id_generation();
     test_out_of_range_id_rejection();
     test_can_receive_standalone();
+    test_robstride_raw_bridge();
 
     printf("\n============================================================\n");
     printf("   ALL EXHAUSTIVE TESTS PASSED FLAWLESSLY                   \n");

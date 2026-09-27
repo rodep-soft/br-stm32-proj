@@ -17,6 +17,7 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "stm32f7xx_hal.h"
+#include "FreeRTOS.h"
 #include "lwip/netif.h"
 #include "lwip/ip4_addr.h"
 #include "lwip/dhcp.h"
@@ -33,6 +34,8 @@ extern struct netif gnetif;
 typedef struct {
     uint32_t id;
     uint8_t  dlc;
+    bool     is_extended;
+    bool     is_rtr;
     uint8_t  data[8];
 } can_frame_t;
 
@@ -99,54 +102,89 @@ static void can_hardware_init(void) {
         configASSERT(0);
     }
 
-    /* Build Whitelist Filter Bank from g_bridge_topics in 16-bit list mode */
-    uint16_t filter_slots[56];
-    size_t id_count = 0;
-
+    /* Check if raw CAN frame bridging is requested */
+    bool has_raw_bridge = false;
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
-        const bridge_topic_t *t = &g_bridge_topics[i];
-        if (t->dir == BRIDGE_DIR_ROS_TO_CAN) continue;
-
-        if (t->dir == BRIDGE_DIR_CAN_RECV) {
-            if (id_count < 56) {
-                filter_slots[id_count++] = (uint16_t)(((t->can_base_id) & 0x7FF) << 5);
-            }
-            continue;
-        }
-
-        uint8_t n_frames = (uint8_t)((t->msg_size + 7) / 8);
-        for (uint8_t f = 0; f < n_frames && id_count < 56; f++) {
-            filter_slots[id_count++] = (uint16_t)(((t->can_base_id + f) & 0x7FF) << 5);
+        if (g_bridge_topics[i].dir == BRIDGE_DIR_CAN_TO_ROS_RAW ||
+            g_bridge_topics[i].dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
+            has_raw_bridge = true;
+            break;
         }
     }
 
-    size_t bank_idx = 0;
-    size_t cur_id = 0;
-    while (cur_id < id_count && bank_idx < 14) {
-        uint16_t s[4];
-        for (int j = 0; j < 4; j++) {
-            s[j] = (cur_id < id_count) ? filter_slots[cur_id++] : s[j > 0 ? j - 1 : 0];
-        }
+    if (has_raw_bridge) {
+        /* Accept all standard and extended frames in 32-bit mask mode on Bank 0 */
         CAN_FilterTypeDef f = {
-            .FilterBank = bank_idx,
-            .FilterMode = CAN_FILTERMODE_IDLIST,
-            .FilterScale = CAN_FILTERSCALE_16BIT,
-            .FilterIdHigh = s[0],
-            .FilterIdLow = s[1],
-            .FilterMaskIdHigh = s[2],
-            .FilterMaskIdLow = s[3],
+            .FilterBank = 0,
+            .FilterMode = CAN_FILTERMODE_IDMASK,
+            .FilterScale = CAN_FILTERSCALE_32BIT,
+            .FilterIdHigh = 0x0000,
+            .FilterIdLow = 0x0000,
+            .FilterMaskIdHigh = 0x0000,
+            .FilterMaskIdLow = 0x0000,
             .FilterFIFOAssignment = CAN_RX_FIFO0,
             .FilterActivation = ENABLE,
             .SlaveStartFilterBank = 14,
         };
         HAL_CAN_ConfigFilter(&hcan1, &f);
-        bank_idx++;
-    }
 
-    /* Disable unused filter banks */
-    for (; bank_idx < 14; bank_idx++) {
-        CAN_FilterTypeDef f = {.FilterBank = bank_idx, .FilterActivation = DISABLE, .SlaveStartFilterBank = 14};
-        HAL_CAN_ConfigFilter(&hcan1, &f);
+        for (size_t bank_idx = 1; bank_idx < 14; bank_idx++) {
+            CAN_FilterTypeDef f_dis = {.FilterBank = bank_idx, .FilterActivation = DISABLE, .SlaveStartFilterBank = 14};
+            HAL_CAN_ConfigFilter(&hcan1, &f_dis);
+        }
+        printf("[CAN] HW Filter: Raw Transparent Bridge Mode (Accept All Standard/Extended)\r\n");
+    } else {
+        /* Build Whitelist Filter Bank from g_bridge_topics in 16-bit list mode */
+        uint16_t filter_slots[56];
+        size_t id_count = 0;
+
+        for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+            const bridge_topic_t *t = &g_bridge_topics[i];
+            if (t->dir == BRIDGE_DIR_ROS_TO_CAN ||
+                t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW ||
+                t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) continue;
+
+            if (t->dir == BRIDGE_DIR_CAN_RECV) {
+                if (id_count < 56) {
+                    filter_slots[id_count++] = (uint16_t)(((t->can_base_id) & 0x7FF) << 5);
+                }
+                continue;
+            }
+
+            uint8_t n_frames = (uint8_t)((t->msg_size + 7) / 8);
+            for (uint8_t f = 0; f < n_frames && id_count < 56; f++) {
+                filter_slots[id_count++] = (uint16_t)(((t->can_base_id + f) & 0x7FF) << 5);
+            }
+        }
+
+        size_t bank_idx = 0;
+        size_t cur_id = 0;
+        while (cur_id < id_count && bank_idx < 14) {
+            uint16_t s[4];
+            for (int j = 0; j < 4; j++) {
+                s[j] = (cur_id < id_count) ? filter_slots[cur_id++] : s[j > 0 ? j - 1 : 0];
+            }
+            CAN_FilterTypeDef f = {
+                .FilterBank = bank_idx,
+                .FilterMode = CAN_FILTERMODE_IDLIST,
+                .FilterScale = CAN_FILTERSCALE_16BIT,
+                .FilterIdHigh = s[0],
+                .FilterIdLow = s[1],
+                .FilterMaskIdHigh = s[2],
+                .FilterMaskIdLow = s[3],
+                .FilterFIFOAssignment = CAN_RX_FIFO0,
+                .FilterActivation = ENABLE,
+                .SlaveStartFilterBank = 14,
+            };
+            HAL_CAN_ConfigFilter(&hcan1, &f);
+            bank_idx++;
+        }
+
+        /* Disable unused filter banks */
+        for (; bank_idx < 14; bank_idx++) {
+            CAN_FilterTypeDef f = {.FilterBank = bank_idx, .FilterActivation = DISABLE, .SlaveStartFilterBank = 14};
+            HAL_CAN_ConfigFilter(&hcan1, &f);
+        }
     }
 
     HAL_CAN_Start(&hcan1);
@@ -157,20 +195,25 @@ static void can_hardware_init(void) {
     printf("[CAN] HW Filter & Bitrate configured (%lu bps)\r\n", (unsigned long)CONFIG_CAN_BITRATE);
 }
 
-/* Direct thread-safe CAN transmission */
-static bool can_send_frame(uint32_t id, const uint8_t *data, uint8_t dlc) {
-    /* Validate standard CAN ID range (0x000..0x7FF) and payload */
-    if (id > 0x7FFU || data == NULL) {
+/* Direct thread-safe CAN transmission supporting Standard (11-bit) and Extended (29-bit) IDs */
+static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, bool is_extended, bool is_rtr) {
+    if (data == NULL) {
         g_bridge.drop_count++;
         return false;
     }
 
     CAN_TxHeaderTypeDef tx_hdr = {
-        .StdId = id,
-        .IDE = CAN_ID_STD,
-        .RTR = CAN_RTR_DATA,
         .DLC = dlc > 8 ? 8 : dlc,
+        .RTR = is_rtr ? CAN_RTR_REMOTE : CAN_RTR_DATA,
     };
+
+    if (is_extended || id > 0x7FFU) {
+        tx_hdr.IDE = CAN_ID_EXT;
+        tx_hdr.ExtId = id & 0x1FFFFFFFU;
+    } else {
+        tx_hdr.IDE = CAN_ID_STD;
+        tx_hdr.StdId = id & 0x7FFU;
+    }
 
     TickType_t start = xTaskGetTickCount();
     while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
@@ -190,6 +233,10 @@ static bool can_send_frame(uint32_t id, const uint8_t *data, uint8_t dlc) {
     return false;
 }
 
+static inline bool can_send_frame(uint32_t id, const uint8_t *data, uint8_t dlc) {
+    return can_send_frame_ex(id, data, dlc, (id > 0x7FFU), false);
+}
+
 /* ───────────────────── Fast ISR Context (< 2µs) ────────────────────── */
 
 void CAN1_RX0_IRQHandler(void) {
@@ -201,8 +248,15 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
     can_frame_t frame;
 
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_hdr, frame.data) == HAL_OK) {
-        if (rx_hdr.IDE == CAN_ID_STD && g_rx_queue != NULL) {
-            frame.id  = rx_hdr.StdId;
+        if (g_rx_queue != NULL) {
+            if (rx_hdr.IDE == CAN_ID_EXT) {
+                frame.id = rx_hdr.ExtId;
+                frame.is_extended = true;
+            } else {
+                frame.id = rx_hdr.StdId;
+                frame.is_extended = false;
+            }
+            frame.is_rtr = (rx_hdr.RTR == CAN_RTR_REMOTE);
             frame.dlc = (uint8_t)rx_hdr.DLC;
 
             BaseType_t xHigherPriorityTaskWoken = pdFALSE;
@@ -279,6 +333,15 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
 
     if (!t->deserialize_fn(&ub, msg_buffer)) return;
 
+    /* Raw CAN Frame -> Direct CAN TX */
+    if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
+        const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
+        can_send_frame_ex(cf->id, cf->data, cf->dlc, cf->is_extended, cf->is_rtr);
+        g_bridge.zenoh_to_can_count++;
+        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+        return;
+    }
+
     printf("[ROS-RX] /%s: ", t->topic_name);
     if (t->print_fn != NULL) {
         t->print_fn(msg_buffer);
@@ -313,6 +376,37 @@ static void bridge_worker_task(void const *arg) {
 
         uint32_t now = HAL_GetTick();
 
+        /* 1. Raw Transparent CAN Frame Forwarding -> ROS 2 (/from_can_bus) */
+        if (g_bridge.zenoh_ready) {
+            for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+                const bridge_topic_t *t = &g_bridge_topics[i];
+                if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
+                    topic_runtime_t *rt = &g_runtimes[i];
+
+                    can_msgs_Frame out_frame;
+                    memset(&out_frame, 0, sizeof(out_frame));
+                    out_frame.header.sec = (int32_t)(now / 1000);
+                    out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
+                    strncpy(out_frame.header.frame_id, "can1", sizeof(out_frame.header.frame_id) - 1);
+                    out_frame.id = frame.id;
+                    out_frame.is_extended = frame.is_extended;
+                    out_frame.is_rtr = frame.is_rtr;
+                    out_frame.is_error = false;
+                    out_frame.dlc = frame.dlc;
+                    memcpy(out_frame.data, frame.data, frame.dlc > 8 ? 8 : frame.dlc);
+
+                    ucdrBuffer ub;
+                    ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
+                    if (can_msgs_Frame_serialize(&ub, &out_frame)) {
+                        zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
+                        g_bridge.can_to_zenoh_count++;
+                        HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                    }
+                }
+            }
+        }
+
+        /* 2. Topic-specific CAN Handlers (Standalone Receiver & Multi-frame Reassembly) */
         for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
             const bridge_topic_t *t = &g_bridge_topics[i];
 
@@ -320,11 +414,15 @@ static void bridge_worker_task(void const *arg) {
             if (t->dir == BRIDGE_DIR_CAN_RECV) {
                 if (frame.id == t->can_base_id) {
                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-                    printf("[CAN-RX] %s (0x%03lX): ", t->topic_name, (unsigned long)t->can_base_id);
-                    if (t->print_fn != NULL) {
-                        t->print_fn(frame.data);
-                    } else {
-                        printf("dlc=%u\r\n", frame.dlc);
+                    static uint32_t last_print = 0;
+                    if (now - last_print >= 1000) {
+                        last_print = now;
+                        printf("[CAN-RX] %s (0x%03lX): ", t->topic_name, (unsigned long)t->can_base_id);
+                        if (t->print_fn != NULL) {
+                            t->print_fn(frame.data);
+                        } else {
+                            printf("dlc=%u\r\n", frame.dlc);
+                        }
                     }
                     continue;
                 }
@@ -366,11 +464,15 @@ static void bridge_worker_task(void const *arg) {
                             g_bridge.can_to_zenoh_count++;
                             HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
-                            printf("[ROS-TX] /%s: ", t->topic_name);
-                            if (t->print_fn != NULL) {
-                                t->print_fn(rt->buffer);
-                            } else {
-                                printf("(%zu bytes)\r\n", t->msg_size);
+                            static uint32_t last_tx_print = 0;
+                            if (now - last_tx_print >= 1000) {
+                                last_tx_print = now;
+                                printf("[ROS-TX] /%s: ", t->topic_name);
+                                if (t->print_fn != NULL) {
+                                    t->print_fn(rt->buffer);
+                                } else {
+                                    printf("(%zu bytes)\r\n", t->msg_size);
+                                }
                             }
                         }
                     }
@@ -419,9 +521,13 @@ static void zenoh_engine_task(void const *arg) {
     }
 
     /* Auto-register topics from declarative master table */
+    printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         topic_runtime_t *rt = &g_runtimes[i];
+
+        printf("[Bridge] Registering [%u] %s (heap: %u)\r\n",
+               (unsigned)i, t->topic_name, (unsigned)xPortGetFreeHeapSize());
 
         if (t->dir == BRIDGE_DIR_CAN_RECV) {
             printf("  [RECV] %-16s : CAN 0x%03lX (Standalone Receiver)\r\n",
@@ -436,18 +542,28 @@ static void zenoh_engine_task(void const *arg) {
         rt->rx_msg_count   = 0;
 
         if (t->dir == BRIDGE_DIR_CAN_TO_ROS) {
-            zenoh_ros2_pub_create(&rt->pub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash);
-            printf("  [PUB] /%-16s -> CAN 0x%03lX..0x%03lX (%u frames)\r\n",
+            bool ok = zenoh_ros2_pub_create(&rt->pub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash);
+            printf("  [PUB] /%-16s -> CAN 0x%03lX..0x%03lX (%u frames) [%s]\r\n",
                    t->topic_name, (unsigned long)t->can_base_id,
-                   (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames);
-        } else {
-            zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
+                   (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames,
+                   ok ? "OK" : "FAIL");
+        } else if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
+            bool ok = zenoh_ros2_pub_create(&rt->pub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash);
+            printf("  [PUB] /%-16s -> Raw CAN Frame Bridge [%s]\r\n", t->topic_name, ok ? "OK" : "FAIL");
+        } else if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
+            bool ok = zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
                                   on_zenoh_sub_message, (void *)i);
-            printf("  [SUB] /%-16s <- CAN 0x%03lX..0x%03lX (%u frames)\r\n",
+            printf("  [SUB] /%-16s <- Raw CAN Frame Bridge [%s]\r\n", t->topic_name, ok ? "OK" : "FAIL");
+        } else {
+            bool ok = zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
+                                  on_zenoh_sub_message, (void *)i);
+            printf("  [SUB] /%-16s <- CAN 0x%03lX..0x%03lX (%u frames) [%s]\r\n",
                    t->topic_name, (unsigned long)t->can_base_id,
-                   (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames);
+                   (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames,
+                   ok ? "OK" : "FAIL");
         }
     }
+    printf("[Bridge] Free heap after topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
 
     zp_start_read_task(z_loan_mut(g_bridge.session), NULL);
     zp_start_lease_task(z_loan_mut(g_bridge.session), NULL);
