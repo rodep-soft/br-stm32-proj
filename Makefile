@@ -261,7 +261,12 @@ do-test:
 ## Serial Monitor (ST-LINK Virtual COM Port)
 ## -----------------------------------------------------------------------------
 
-SERIAL_PORT ?= $(shell ls /dev/ttyACM* 2>/dev/null | head -n 1)
+SERIAL_PORT ?= $(shell \
+	if [ -d /dev/serial/by-id ]; then \
+		stlink=$$(ls /dev/serial/by-id/*STLink* 2>/dev/null | head -n 1); \
+		if [ -n "$$stlink" ]; then readlink -f "$$stlink"; exit 0; fi; \
+	fi; \
+	ls /dev/ttyACM* 2>/dev/null | head -n 1)
 SERIAL_BAUD ?= 115200
 
 serial:
