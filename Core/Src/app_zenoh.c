@@ -326,7 +326,7 @@ static void bridge_worker_task(void const *arg) {
                     } else {
                         printf("dlc=%u\r\n", frame.dlc);
                     }
-                    break;
+                    continue;
                 }
                 continue;
             }
