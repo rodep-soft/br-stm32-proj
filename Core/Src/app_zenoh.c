@@ -105,7 +105,14 @@ static void can_hardware_init(void) {
 
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
-        if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+        if (t->dir == BRIDGE_DIR_ROS_TO_CAN) continue;
+
+        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+            if (id_count < 56) {
+                filter_slots[id_count++] = (uint16_t)(((t->can_base_id) & 0x7FF) << 5);
+            }
+            continue;
+        }
 
         uint8_t n_frames = (uint8_t)((t->msg_size + 7) / 8);
         for (uint8_t f = 0; f < n_frames && id_count < 56; f++) {
@@ -280,8 +287,7 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
 
 static void bridge_worker_task(void const *arg) {
     (void)arg;
-    while (!g_bridge.zenoh_ready) osDelay(50);
-    printf("[Bridge] CAN->Zenoh worker running (DTCM-RAM)\r\n");
+    printf("[Bridge] CAN worker running (DTCM-RAM)\r\n");
 
     can_frame_t frame;
     uint8_t cdr_buf[256];
@@ -293,7 +299,23 @@ static void bridge_worker_task(void const *arg) {
 
         for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
             const bridge_topic_t *t = &g_bridge_topics[i];
+
+            /* Standalone CAN Loopback: echo immediately without PC/Zenoh/LAN */
+            if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+                if (frame.id == t->can_base_id) {
+                    can_send_frame(t->can_echo_id, frame.data, frame.dlc);
+                    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                    printf("[CAN-ECHO] %s: 0x%03lX -> 0x%03lX (%u bytes)\r\n",
+                           t->topic_name, (unsigned long)t->can_base_id,
+                           (unsigned long)t->can_echo_id, frame.dlc);
+                    break;
+                }
+                continue;
+            }
+
             if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+            if (!g_bridge.zenoh_ready) continue;
+
             topic_runtime_t *rt = &g_runtimes[i];
 
             if (frame.id >= t->can_base_id && frame.id < (t->can_base_id + rt->num_frames)) {
@@ -343,9 +365,9 @@ static void zenoh_engine_task(void const *arg) {
     printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
     printf("==================================================\r\n");
 
-    wait_for_network();
     can_hardware_init();
     printf("[CAN] HW Filter & Bitrate configured (%lu bps)\r\n", (unsigned long)CONFIG_CAN_BITRATE);
+    wait_for_network();
 
     /* Open Zenoh session */
     z_owned_config_t config;
@@ -377,6 +399,12 @@ static void zenoh_engine_task(void const *arg) {
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         topic_runtime_t *rt = &g_runtimes[i];
+
+        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+            printf("  [ECHO] %-16s : CAN 0x%03lX -> 0x%03lX (Standalone)\r\n",
+                   t->topic_name, (unsigned long)t->can_base_id, (unsigned long)t->can_echo_id);
+            continue;
+        }
 
         rt->num_frames     = (uint8_t)((t->msg_size + 7) / 8);
         rt->expected_mask  = (uint16_t)((1U << rt->num_frames) - 1U);

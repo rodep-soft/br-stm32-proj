@@ -319,7 +319,12 @@ static void test_hardware_filter_id_generation(void) {
 
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
-        if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+        if (t->dir == BRIDGE_DIR_ROS_TO_CAN) continue;
+
+        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+            filter_ids[count++] = t->can_base_id;
+            continue;
+        }
 
         uint8_t n_frames = (uint8_t)((t->msg_size + 7) / 8);
         for (uint8_t f = 0; f < n_frames && count < 56; f++) {
@@ -327,8 +332,8 @@ static void test_hardware_filter_id_generation(void) {
         }
     }
 
-    /* We have motor_status (4 frames: 0x100..0x103) and imu_data (3 frames: 0x200..0x202) */
-    ASSERT_TRUE(count == 7);
+    /* We have motor_status (4 frames: 0x100..0x103), imu_data (3 frames: 0x200..0x202), and arduino_echo (0x400) */
+    ASSERT_TRUE(count == 8);
     ASSERT_TRUE(filter_ids[0] == 0x100);
     ASSERT_TRUE(filter_ids[1] == 0x101);
     ASSERT_TRUE(filter_ids[2] == 0x102);
@@ -336,8 +341,9 @@ static void test_hardware_filter_id_generation(void) {
     ASSERT_TRUE(filter_ids[4] == 0x200);
     ASSERT_TRUE(filter_ids[5] == 0x201);
     ASSERT_TRUE(filter_ids[6] == 0x202);
+    ASSERT_TRUE(filter_ids[7] == 0x400);
 
-    printf("       test_hardware_filter_id_generation: PASSED ✅ (%zu IDs generated)\n", count);
+    printf("       test_hardware_filter_id_generation: PASSED (%zu IDs generated)\n", count);
 }
 
 /* ==============================================================================
@@ -354,7 +360,30 @@ static void test_out_of_range_id_rejection(void) {
     uint32_t valid_id = 0x7FF;
     ASSERT_TRUE(valid_id <= 0x7FFU);
 
-    printf("       test_out_of_range_id_rejection: PASSED ✅\n");
+    printf("       test_out_of_range_id_rejection: PASSED\n");
+}
+
+/* ==============================================================================
+ * Test 8: Standalone CAN Echo Routing Validation
+ * ============================================================================== */
+static void test_can_echo_routing(void) {
+    printf("[TEST] Running test_can_echo_routing...\n");
+
+    const bridge_topic_t *echo_topic = NULL;
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        if (g_bridge_topics[i].dir == BRIDGE_DIR_CAN_ECHO) {
+            echo_topic = &g_bridge_topics[i];
+            break;
+        }
+    }
+
+    ASSERT_TRUE(echo_topic != NULL);
+    ASSERT_TRUE(strcmp(echo_topic->topic_name, "arduino_echo") == 0);
+    ASSERT_TRUE(echo_topic->can_base_id == 0x400);
+    ASSERT_TRUE(echo_topic->can_echo_id == 0x401);
+    ASSERT_TRUE(echo_topic->msg_size == 8);
+
+    printf("       test_can_echo_routing: PASSED\n");
 }
 
 /* ==============================================================================
@@ -372,9 +401,10 @@ int main(void) {
     test_packet_loss_self_healing();
     test_hardware_filter_id_generation();
     test_out_of_range_id_rejection();
+    test_can_echo_routing();
 
     printf("\n============================================================\n");
-    printf("   ✅ ALL EXHAUSTIVE TESTS PASSED FLAWLESSLY!               \n");
+    printf("   ALL EXHAUSTIVE TESTS PASSED FLAWLESSLY                   \n");
     printf("============================================================\n\n");
     return 0;
 }
