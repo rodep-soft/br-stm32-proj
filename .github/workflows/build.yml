@@ -42,7 +42,7 @@ jobs:
         run: |
           cmake -B tests/build -S tests -G Ninja
           cmake --build tests/build
-          ./tests/build/test_serialization
+          ctest --test-dir tests/build --output-on-failure
 
       - name: Configure CMake
         run: |
