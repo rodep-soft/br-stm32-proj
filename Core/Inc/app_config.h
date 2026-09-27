@@ -170,8 +170,8 @@ static const bridge_topic_t g_bridge_topics[] = {
     /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
     BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300),
 
-    /* 4. CAN -> ROS 2: Ping (0x400) */
-    // BRIDGE_CAN_RECV("ping_echo",       Ping,         0x400),
+    /* 4. Standalone CAN Receiver: Ping (rx: 0x400) */
+    BRIDGE_CAN_RECV("ping_echo",       Ping,         0x400),
     // 成功！
     BRIDGE_CAN_TO_ROS("kokura_speak", Ping, 0x400),
 };

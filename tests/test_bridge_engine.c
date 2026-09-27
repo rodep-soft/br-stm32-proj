@@ -332,8 +332,8 @@ static void test_hardware_filter_id_generation(void) {
         }
     }
 
-    /* We have motor_status (4 frames: 0x100..0x103), imu_data (3 frames: 0x200..0x202), and ping_echo (0x400) */
-    ASSERT_TRUE(count == 8);
+    /* We have motor_status (4 frames: 0x100..0x103), imu_data (3 frames: 0x200..0x202), ping_echo (0x400), and kokura_speak (0x400) */
+    ASSERT_TRUE(count == 9);
     ASSERT_TRUE(filter_ids[0] == 0x100);
     ASSERT_TRUE(filter_ids[1] == 0x101);
     ASSERT_TRUE(filter_ids[2] == 0x102);
@@ -342,6 +342,7 @@ static void test_hardware_filter_id_generation(void) {
     ASSERT_TRUE(filter_ids[5] == 0x201);
     ASSERT_TRUE(filter_ids[6] == 0x202);
     ASSERT_TRUE(filter_ids[7] == 0x400);
+    ASSERT_TRUE(filter_ids[8] == 0x400);
 
     printf("       test_hardware_filter_id_generation: PASSED (%zu IDs generated)\n", count);
 }

@@ -1,3 +1,2 @@
 # Ping.msg
-# type_hash: RIHS01_3342d84a4feda41ce1efaba93ef02c620526cbdb5998148b7e6071d26a9e132f
 uint32 count

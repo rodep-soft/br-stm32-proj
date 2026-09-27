@@ -12,6 +12,7 @@ import sys
 import re
 import argparse
 import hashlib
+import json
 from pathlib import Path
 
 # Mapping ROS 2 primitive types to C types and Micro-CDR serialization suffixes
@@ -114,16 +115,108 @@ def parse_msg_file(file_path: Path) -> tuple[list[Field], dict[str, str]]:
     return fields, metadata
 
 
+# ROS 2 REP-2011 type IDs: (scalar_id, array_id)
+# See ROS 2 rosidl_generator_type_description
+REP2011_TYPE_IDS = {
+    'bool': (15, 63),
+    'byte': (16, 64),
+    'char': (13, 61),
+    'float32': (10, 58),
+    'float64': (11, 59),
+    'int8': (2, 50),
+    'uint8': (3, 51),
+    'int16': (4, 52),
+    'uint16': (5, 53),
+    'int32': (6, 54),
+    'uint32': (7, 55),
+    'int64': (8, 56),
+    'uint64': (9, 57),
+    'string': (17, 65),
+}
+
+# Standard referenced types for Header
+HEADER_REFERENCED_TYPES = [
+    {
+        'type_name': 'builtin_interfaces/msg/Time',
+        'fields': [
+            {'name': 'sec', 'type': {'type_id': 6, 'capacity': 0, 'string_capacity': 0, 'nested_type_name': ''}},
+            {'name': 'nanosec', 'type': {'type_id': 7, 'capacity': 0, 'string_capacity': 0, 'nested_type_name': ''}}
+        ]
+    },
+    {
+        'type_name': 'std_msgs/msg/Header',
+        'fields': [
+            {'name': 'stamp', 'type': {'type_id': 1, 'capacity': 0, 'string_capacity': 0, 'nested_type_name': 'builtin_interfaces/msg/Time'}},
+            {'name': 'frame_id', 'type': {'type_id': 17, 'capacity': 0, 'string_capacity': 0, 'nested_type_name': ''}}
+        ]
+    }
+]
+
+
 def compute_rihs01_hash(package_name: str, msg_name: str, fields: list[Field]) -> str:
-    """Computes a mock/approximate RIHS01 SHA-256 type hash."""
-    norm_lines = []
+    """Computes the official ROS 2 REP-2011 RIHS01 SHA-256 type hash."""
+    type_name = f"{package_name}/msg/{msg_name}"
+    field_entries = []
+    has_header = False
+
     for f in fields:
-        if f.is_array:
-            norm_lines.append(f"{f.raw_type}[{f.array_size}] {f.name}")
+        if f.is_header:
+            has_header = True
+            field_entries.append({
+                'name': f.name,
+                'type': {
+                    'type_id': 1,
+                    'capacity': 0,
+                    'string_capacity': 0,
+                    'nested_type_name': 'std_msgs/msg/Header'
+                }
+            })
+        elif f.raw_type in REP2011_TYPE_IDS:
+            scalar_id, array_id = REP2011_TYPE_IDS[f.raw_type]
+            if f.is_array:
+                field_entries.append({
+                    'name': f.name,
+                    'type': {
+                        'type_id': array_id,
+                        'capacity': f.array_size,
+                        'string_capacity': 0,
+                        'nested_type_name': ''
+                    }
+                })
+            else:
+                field_entries.append({
+                    'name': f.name,
+                    'type': {
+                        'type_id': scalar_id,
+                        'capacity': 0,
+                        'string_capacity': 0,
+                        'nested_type_name': ''
+                    }
+                })
         else:
-            norm_lines.append(f"{f.raw_type} {f.name}")
-    norm_content = f"package {package_name}\nmsg {msg_name}\n" + "\n".join(norm_lines) + "\n"
-    sha = hashlib.sha256(norm_content.encode('utf-8')).hexdigest()
+            field_entries.append({
+                'name': f.name,
+                'type': {
+                    'type_id': 1,
+                    'capacity': 0,
+                    'string_capacity': 0,
+                    'nested_type_name': f.raw_type
+                }
+            })
+
+    ref_types = HEADER_REFERENCED_TYPES if has_header else []
+    ref_types_sorted = sorted(ref_types, key=lambda x: x['type_name'])
+
+    hashable_dict = {
+        'type_description': {
+            'type_name': type_name,
+            'fields': field_entries
+        },
+        'referenced_type_descriptions': ref_types_sorted
+    }
+
+    hashable_repr = json.dumps(hashable_dict, separators=(', ', ': '), sort_keys=False)
+    sha = hashlib.sha256(hashable_repr.encode('utf-8')).hexdigest()
     return f"RIHS01_{sha}"
 
 
