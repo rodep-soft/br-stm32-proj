@@ -21,6 +21,7 @@
 #include "generated/MotorStatus.h"
 #include "generated/ImuData.h"
 #include "generated/MotorCommand.h"
+#include "generated/Ping.h"
 #include "generated/Frame.h"
 
 #ifdef __cplusplus
@@ -89,6 +90,8 @@ typedef enum {
     BRIDGE_DIR_CAN_ECHO,        /**< Standalone CAN Loopback: reply rx_id -> tx_id without PC/Zenoh */
 } bridge_dir_t;
 
+typedef void (*msg_print_fn_t)(const void *topic);
+
 typedef struct {
     const char           *topic_name;
     bridge_dir_t          dir;
@@ -99,6 +102,7 @@ typedef struct {
     const char           *type_hash;
     cdr_serialize_fn_t    serialize_fn;
     cdr_deserialize_fn_t  deserialize_fn;
+    msg_print_fn_t        print_fn;
 } bridge_topic_t;
 
 #define BRIDGE_CAN_TO_ROS(topic, msg, can_id) \
@@ -112,6 +116,7 @@ typedef struct {
         .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
         .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
         .deserialize_fn = NULL, \
+        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
     }
 
 #define BRIDGE_ROS_TO_CAN(topic, msg, can_id) \
@@ -125,19 +130,21 @@ typedef struct {
         .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
         .serialize_fn   = NULL, \
         .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
+        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
     }
 
-#define BRIDGE_CAN_ECHO(topic, rx_id, tx_id) \
+#define BRIDGE_CAN_ECHO(topic, msg, rx_id, tx_id) \
     { \
         .topic_name     = topic, \
         .dir            = BRIDGE_DIR_CAN_ECHO, \
         .can_base_id    = rx_id, \
         .can_echo_id    = tx_id, \
-        .msg_size       = 8, \
-        .dds_type       = NULL, \
-        .type_hash      = NULL, \
-        .serialize_fn   = NULL, \
-        .deserialize_fn = NULL, \
+        .msg_size       = sizeof(robot_msgs_##msg), \
+        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
+        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
+        .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
+        .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
+        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
     }
 
 /**
@@ -153,8 +160,8 @@ static const bridge_topic_t g_bridge_topics[] = {
     /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
     BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300),
 
-    /* 4. Standalone CAN Loopback: Arduino R4 Ping-Pong (rx: 0x400 -> tx: 0x401) */
-    BRIDGE_CAN_ECHO("arduino_echo",    0x400,        0x401),
+    /* 4. Standalone CAN Loopback: Ping-Pong (rx: 0x400 -> tx: 0x401) */
+    BRIDGE_CAN_ECHO("ping_echo",       Ping,         0x400,        0x401),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))

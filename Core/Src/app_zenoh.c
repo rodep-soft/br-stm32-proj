@@ -274,6 +274,13 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
 
     if (!t->deserialize_fn(&ub, msg_buffer)) return;
 
+    printf("[ROS-RX] %s: ", t->topic_name);
+    if (t->print_fn != NULL) {
+        t->print_fn(msg_buffer);
+    } else {
+        printf("(%zu bytes)\r\n", t->msg_size);
+    }
+
     /* Directly fire CAN frames to mailbox (no intermediate task needed) */
     for (uint8_t f = 0; f < rt->num_frames; f++) {
         size_t offset = f * 8;
@@ -300,14 +307,16 @@ static void bridge_worker_task(void const *arg) {
         for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
             const bridge_topic_t *t = &g_bridge_topics[i];
 
-            /* Standalone CAN Loopback: echo immediately without PC/Zenoh/LAN */
+            /* Standalone CAN Receiver: log to serial (USART3 / ST-LINK VCP) and toggle LED */
             if (t->dir == BRIDGE_DIR_CAN_ECHO) {
                 if (frame.id == t->can_base_id) {
-                    can_send_frame(t->can_echo_id, frame.data, frame.dlc);
                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-                    printf("[CAN-ECHO] %s: 0x%03lX -> 0x%03lX (%u bytes)\r\n",
-                           t->topic_name, (unsigned long)t->can_base_id,
-                           (unsigned long)t->can_echo_id, frame.dlc);
+                    printf("[CAN-RX] %s (0x%03lX): ", t->topic_name, (unsigned long)t->can_base_id);
+                    if (t->print_fn != NULL) {
+                        t->print_fn(frame.data);
+                    } else {
+                        printf("dlc=%u\r\n", frame.dlc);
+                    }
                     break;
                 }
                 continue;
@@ -339,6 +348,13 @@ static void bridge_worker_task(void const *arg) {
                 if (rt->received_mask == rt->expected_mask) {
                     rt->received_mask = 0;
                     rt->rx_msg_count++;
+
+                    printf("[CAN-RX] %s (0x%03lX): ", t->topic_name, (unsigned long)t->can_base_id);
+                    if (t->print_fn != NULL) {
+                        t->print_fn(rt->buffer);
+                    } else {
+                        printf("(%zu bytes)\r\n", t->msg_size);
+                    }
 
                     if (t->serialize_fn != NULL) {
                         ucdrBuffer ub;
@@ -401,8 +417,8 @@ static void zenoh_engine_task(void const *arg) {
         topic_runtime_t *rt = &g_runtimes[i];
 
         if (t->dir == BRIDGE_DIR_CAN_ECHO) {
-            printf("  [ECHO] %-16s : CAN 0x%03lX -> 0x%03lX (Standalone)\r\n",
-                   t->topic_name, (unsigned long)t->can_base_id, (unsigned long)t->can_echo_id);
+            printf("  [RECV] %-16s : CAN 0x%03lX (Standalone Receiver)\r\n",
+                   t->topic_name, (unsigned long)t->can_base_id);
             continue;
         }
 

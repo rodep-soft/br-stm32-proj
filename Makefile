@@ -23,7 +23,7 @@ ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
 HAS_NIX      := $(shell if command -v nix >/dev/null 2>&1 && [ -d /nix/store ]; then echo 1; fi)
 
-.PHONY: all setup dev shell udev nixconf python-deps firewall-off router zenohd sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help
+.PHONY: all setup dev shell udev nixconf python-deps firewall-off router zenohd sub zenoh-sub msg build do-build flash do-flash flash-openocd do-flash-openocd test do-test size do-size clean help serial
 
 # Default target
 all: build
@@ -257,6 +257,31 @@ do-test:
 	@./$(TEST_BUILD)/test_bridge_engine
 
 ## -----------------------------------------------------------------------------
+## Serial Monitor (ST-LINK Virtual COM Port)
+## -----------------------------------------------------------------------------
+
+SERIAL_PORT ?= $(shell ls /dev/ttyACM* 2>/dev/null | head -n 1)
+SERIAL_BAUD ?= 115200
+
+serial:
+	@if [ -z "$(SERIAL_PORT)" ]; then \
+		echo "❌ No ST-LINK /dev/ttyACM* port found! Check USB connection to Nucleo."; \
+		exit 1; \
+	fi; \
+	echo "==> Opening serial monitor on $(SERIAL_PORT) at $(SERIAL_BAUD) bps..."; \
+	echo "    (To exit picocom: press Ctrl+A followed by Ctrl+X)"; \
+	if command -v picocom >/dev/null 2>&1; then \
+		picocom -b $(SERIAL_BAUD) $(SERIAL_PORT); \
+	elif command -v screen >/dev/null 2>&1; then \
+		screen $(SERIAL_PORT) $(SERIAL_BAUD); \
+	elif python3 -c "import serial.tools.miniterm" >/dev/null 2>&1; then \
+		python3 -m serial.tools.miniterm $(SERIAL_PORT) $(SERIAL_BAUD); \
+	else \
+		echo "❌ No serial terminal found. Please install picocom (e.g. sudo apt install picocom)"; \
+		exit 1; \
+	fi
+
+## -----------------------------------------------------------------------------
 ## Clean Target
 ## -----------------------------------------------------------------------------
 
@@ -279,6 +304,7 @@ help:
 	@echo "  make build            - Generate headers and build STM32 firmware (default)"
 	@echo "  make flash            - Build and flash to STM32 via ST-LINK (st-flash)"
 	@echo "  make flash-openocd    - Build and flash to STM32 via OpenOCD"
+	@echo "  make serial           - Open serial monitor (115200 bps) to view STM32 printf logs"
 	@echo "  make router           - Run standalone Zenoh router (zenohd) on UDP/TCP 7447"
 	@echo "  make sub              - Run Zenoh router & subscriber to receive STM32 messages"
 	@echo "  make test             - Build and run host unit tests"

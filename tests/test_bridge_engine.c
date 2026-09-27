@@ -332,7 +332,7 @@ static void test_hardware_filter_id_generation(void) {
         }
     }
 
-    /* We have motor_status (4 frames: 0x100..0x103), imu_data (3 frames: 0x200..0x202), and arduino_echo (0x400) */
+    /* We have motor_status (4 frames: 0x100..0x103), imu_data (3 frames: 0x200..0x202), and ping_echo (0x400) */
     ASSERT_TRUE(count == 8);
     ASSERT_TRUE(filter_ids[0] == 0x100);
     ASSERT_TRUE(filter_ids[1] == 0x101);
@@ -364,10 +364,55 @@ static void test_out_of_range_id_rejection(void) {
 }
 
 /* ==============================================================================
- * Test 8: Standalone CAN Echo Routing Validation
+ * Test 8: Ping CDR Serialization Roundtrip
  * ============================================================================== */
-static void test_can_echo_routing(void) {
-    printf("[TEST] Running test_can_echo_routing...\n");
+static void test_ping_roundtrip(void) {
+    printf("[TEST] Running test_ping_roundtrip...\n");
+
+    robot_msgs_Ping orig = {
+        .count = 4294967290U,
+        .value = -123.456f,
+    };
+
+    uint8_t cdr_buf[64];
+    ucdrBuffer writer;
+    ucdr_init_buffer(&writer, cdr_buf, sizeof(cdr_buf));
+
+    ASSERT_TRUE(robot_msgs_Ping_serialize(&writer, &orig));
+    size_t len = ucdr_buffer_length(&writer);
+
+    robot_msgs_Ping restored;
+    memset(&restored, 0, sizeof(restored));
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, cdr_buf, len);
+
+    ASSERT_TRUE(robot_msgs_Ping_deserialize(&reader, &restored));
+    ASSERT_TRUE(restored.count == orig.count);
+    ASSERT_FLOAT_EQ(restored.value, orig.value);
+
+    printf("       test_ping_roundtrip: PASSED ✅\n");
+}
+
+/* ==============================================================================
+ * Test 9: Standalone CAN Receive & Ping Message Parsing Validation
+ * ============================================================================== */
+static bool simulate_can_receive(const mock_can_frame_t *rx_frame, robot_msgs_Ping *out_ping) {
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        const bridge_topic_t *t = &g_bridge_topics[i];
+        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+            if (rx_frame->id == t->can_base_id) {
+                if (rx_frame->dlc == sizeof(robot_msgs_Ping)) {
+                    memcpy(out_ping, rx_frame->data, sizeof(robot_msgs_Ping));
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+static void test_can_receive_standalone(void) {
+    printf("[TEST] Running test_can_receive_standalone...\n");
 
     const bridge_topic_t *echo_topic = NULL;
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
@@ -378,12 +423,42 @@ static void test_can_echo_routing(void) {
     }
 
     ASSERT_TRUE(echo_topic != NULL);
-    ASSERT_TRUE(strcmp(echo_topic->topic_name, "arduino_echo") == 0);
+    ASSERT_TRUE(strcmp(echo_topic->topic_name, "ping_echo") == 0);
     ASSERT_TRUE(echo_topic->can_base_id == 0x400);
-    ASSERT_TRUE(echo_topic->can_echo_id == 0x401);
-    ASSERT_TRUE(echo_topic->msg_size == 8);
+    ASSERT_TRUE(echo_topic->msg_size == sizeof(robot_msgs_Ping));
+    ASSERT_TRUE(echo_topic->serialize_fn != NULL);
+    ASSERT_TRUE(echo_topic->deserialize_fn != NULL);
+    ASSERT_TRUE(echo_topic->print_fn != NULL);
 
-    printf("       test_can_echo_routing: PASSED\n");
+    /* Verify all registered topics have print_fn enabled */
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        ASSERT_TRUE(g_bridge_topics[i].print_fn != NULL);
+    }
+
+    /* 1. Simulate receiving a robot_msgs_Ping message */
+    robot_msgs_Ping tx_ping = {
+        .count = 1024,
+        .value = 3.14159f,
+    };
+
+    mock_can_frame_t rx_frame;
+    rx_frame.id = 0x400;
+    rx_frame.dlc = sizeof(robot_msgs_Ping);
+    memcpy(rx_frame.data, &tx_ping, sizeof(robot_msgs_Ping));
+
+    robot_msgs_Ping parsed_ping = {0};
+    bool ok = simulate_can_receive(&rx_frame, &parsed_ping);
+
+    ASSERT_TRUE(ok);
+    ASSERT_TRUE(parsed_ping.count == tx_ping.count);
+    ASSERT_FLOAT_EQ(parsed_ping.value, tx_ping.value);
+
+    /* 2. Unregistered ID should not match */
+    mock_can_frame_t unreg_frame = {.id = 0x402, .dlc = 8};
+    robot_msgs_Ping unreg_ping = {0};
+    ASSERT_TRUE(!simulate_can_receive(&unreg_frame, &unreg_ping));
+
+    printf("       test_can_receive_standalone: PASSED ✅\n");
 }
 
 /* ==============================================================================
@@ -397,11 +472,12 @@ int main(void) {
     test_imu_data_roundtrip();
     test_motor_command_roundtrip();
     test_can_msgs_frame_roundtrip();
+    test_ping_roundtrip();
     test_fragmentation_and_reassembly();
     test_packet_loss_self_healing();
     test_hardware_filter_id_generation();
     test_out_of_range_id_rejection();
-    test_can_echo_routing();
+    test_can_receive_standalone();
 
     printf("\n============================================================\n");
     printf("   ALL EXHAUSTIVE TESTS PASSED FLAWLESSLY                   \n");
