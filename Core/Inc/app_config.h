@@ -21,6 +21,7 @@
 #include "generated/MotorStatus.h"
 #include "generated/ImuData.h"
 #include "generated/MotorCommand.h"
+#include "generated/Ping.h"
 #include "generated/Frame.h"
 
 #ifdef __cplusplus
@@ -60,9 +61,9 @@ extern "C" {
 /* ==============================================================================
  * 3. CAN Bus Settings
  * ============================================================================== */
-
+ 
 // baudrateは合わせる
-#define CONFIG_CAN_BITRATE            500000U  /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
+#define CONFIG_CAN_BITRATE            1000000U  /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
 #define CONFIG_CAN_STATS_PERIOD_MS    3000     /**< Diagnostics reporting interval */
 #define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
 #define CONFIG_CAN_FRAME_TIMEOUT_MS   100      /**< Incomplete multi-frame drop timeout */
@@ -94,17 +95,22 @@ typedef bool (*cdr_deserialize_fn_t)(ucdrBuffer *ub, void *topic);
 typedef enum {
     BRIDGE_DIR_CAN_TO_ROS = 0,  /**< CAN frames assembled -> ROS 2 (Publish) */
     BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
+    BRIDGE_DIR_CAN_ECHO,        /**< Standalone CAN Loopback: reply rx_id -> tx_id without PC/Zenoh */
 } bridge_dir_t;
+
+typedef void (*msg_print_fn_t)(const void *topic);
 
 typedef struct {
     const char           *topic_name;
     bridge_dir_t          dir;
     uint32_t              can_base_id;
+    uint32_t              can_echo_id;   /**< For BRIDGE_DIR_CAN_ECHO: reply ID */
     size_t                msg_size;
     const char           *dds_type;
     const char           *type_hash;
     cdr_serialize_fn_t    serialize_fn;
     cdr_deserialize_fn_t  deserialize_fn;
+    msg_print_fn_t        print_fn;
 } bridge_topic_t;
 
 #define BRIDGE_CAN_TO_ROS(topic, msg, can_id) \
@@ -112,11 +118,13 @@ typedef struct {
         .topic_name     = topic, \
         .dir            = BRIDGE_DIR_CAN_TO_ROS, \
         .can_base_id    = can_id, \
+        .can_echo_id    = 0, \
         .msg_size       = sizeof(robot_msgs_##msg), \
         .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
         .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
         .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
         .deserialize_fn = NULL, \
+        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
     }
 
 #define BRIDGE_ROS_TO_CAN(topic, msg, can_id) \
@@ -124,15 +132,31 @@ typedef struct {
         .topic_name     = topic, \
         .dir            = BRIDGE_DIR_ROS_TO_CAN, \
         .can_base_id    = can_id, \
+        .can_echo_id    = 0, \
         .msg_size       = sizeof(robot_msgs_##msg), \
         .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
         .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
         .serialize_fn   = NULL, \
         .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
+        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
+    }
+
+#define BRIDGE_CAN_ECHO(topic, msg, rx_id, tx_id) \
+    { \
+        .topic_name     = topic, \
+        .dir            = BRIDGE_DIR_CAN_ECHO, \
+        .can_base_id    = rx_id, \
+        .can_echo_id    = tx_id, \
+        .msg_size       = sizeof(robot_msgs_##msg), \
+        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
+        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
+        .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
+        .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
+        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
     }
 
 /**
- * MASTER TOPIC TABLE: Add your sensors and actuators here!
+ * MASTER TOPIC TABLE: Add your sensors, actuators, and ping-pong devices here.
  */
 
 // ここにデータ送受信を定義
@@ -146,6 +170,9 @@ static const bridge_topic_t g_bridge_topics[] = {
 
     /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
     BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300),
+
+    /* 4. Standalone CAN Loopback: Ping-Pong (rx: 0x400 -> tx: 0x401) */
+    BRIDGE_CAN_ECHO("ping_echo",       Ping,         0x400,        0x401),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))
