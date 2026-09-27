@@ -1,7 +1,7 @@
 // CAN Send Example
 //
 
-#include <arduino.h>
+#include <Arduino.h>
 #include <mcp_can.h>
 #include <SPI.h>
 
