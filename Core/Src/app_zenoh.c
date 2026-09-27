@@ -88,9 +88,9 @@ static void can_hardware_init(void) {
     hcan1.Instance                  = CAN1;
     hcan1.Init.Prescaler            = CONFIG_CAN_PRESCALER;
     hcan1.Init.Mode                 = CAN_MODE_NORMAL;
-    hcan1.Init.SyncJumpWidth        = CAN_SJW_1TQ;
-    hcan1.Init.TimeSeg1             = CAN_BS1_13TQ;
-    hcan1.Init.TimeSeg2             = CAN_BS2_2TQ;
+    hcan1.Init.SyncJumpWidth        = CAN_SJW_2TQ;
+    hcan1.Init.TimeSeg1             = CAN_BS1_12TQ;
+    hcan1.Init.TimeSeg2             = CAN_BS2_3TQ;
     hcan1.Init.TimeTriggeredMode    = DISABLE;
     hcan1.Init.AutoBusOff           = ENABLE;
     hcan1.Init.AutoWakeUp           = DISABLE;
@@ -187,7 +187,9 @@ static void can_hardware_init(void) {
         }
     }
 
-    HAL_CAN_Start(&hcan1);
+    HAL_StatusTypeDef start_res = HAL_CAN_Start(&hcan1);
+    printf("[CAN] HAL_CAN_Start result: %d (state=%d, err=0x%08lX, MSR=0x%08lX)\r\n",
+           (int)start_res, (int)hcan1.State, (unsigned long)hcan1.ErrorCode, (unsigned long)hcan1.Instance->MSR);
     HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 
     HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 6, 0);
@@ -215,9 +217,20 @@ static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, boo
         tx_hdr.StdId = id & 0x7FFU;
     }
 
+    /* Ensure CAN controller is listening / ready */
+    if (hcan1.State != HAL_CAN_STATE_LISTENING && hcan1.State != HAL_CAN_STATE_READY) {
+        printf("[CAN-TX-WARN] hcan1.State=%d, restarting CAN...\r\n", (int)hcan1.State);
+        HAL_CAN_Start(&hcan1);
+    }
+
     TickType_t start = xTaskGetTickCount();
     while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
         if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(CONFIG_CAN_TX_TIMEOUT_MS)) {
+            printf("[CAN-TX-ERR] Tx Mailbox Full! TSR=0x%08lX free=%lu state=%d err=0x%08lX\r\n",
+                   (unsigned long)hcan1.Instance->TSR,
+                   (unsigned long)HAL_CAN_GetTxMailboxesFreeLevel(&hcan1),
+                   (int)hcan1.State, (unsigned long)hcan1.ErrorCode);
+            HAL_CAN_AbortTxRequest(&hcan1, CAN_TX_MAILBOX0 | CAN_TX_MAILBOX1 | CAN_TX_MAILBOX2);
             g_bridge.drop_count++;
             return false;
         }
@@ -225,10 +238,13 @@ static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, boo
     }
 
     uint32_t mb;
-    if (HAL_CAN_AddTxMessage(&hcan1, &tx_hdr, (uint8_t *)data, &mb) == HAL_OK) {
+    HAL_StatusTypeDef status = HAL_CAN_AddTxMessage(&hcan1, &tx_hdr, (uint8_t *)data, &mb);
+    if (status == HAL_OK) {
         g_bridge.raw_tx_frames++;
         return true;
     }
+    printf("[CAN-TX-ERR] HAL_CAN_AddTxMessage failed: status=%d, err=0x%08lX, state=%d TSR=0x%08lX\r\n",
+           (int)status, (unsigned long)hcan1.ErrorCode, (int)hcan1.State, (unsigned long)hcan1.Instance->TSR);
     g_bridge.drop_count++;
     return false;
 }
@@ -336,6 +352,10 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
     /* Raw CAN Frame -> Direct CAN TX */
     if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
         const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
+        printf("[RAW-TX] id=0x%08lX ext=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+               (unsigned long)cf->id, cf->is_extended, cf->dlc,
+               cf->data[0], cf->data[1], cf->data[2], cf->data[3],
+               cf->data[4], cf->data[5], cf->data[6], cf->data[7]);
         can_send_frame_ex(cf->id, cf->data, cf->dlc, cf->is_extended, cf->is_rtr);
         g_bridge.zenoh_to_can_count++;
         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
@@ -375,6 +395,13 @@ static void bridge_worker_task(void const *arg) {
         if (xQueueReceive(g_rx_queue, &frame, portMAX_DELAY) != pdTRUE) continue;
 
         uint32_t now = HAL_GetTick();
+
+        if (frame.id != 0x400) {
+            printf("[RAW-RX] id=0x%08lX ext=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
+                   (unsigned long)frame.id, frame.is_extended, frame.dlc,
+                   frame.data[0], frame.data[1], frame.data[2], frame.data[3],
+                   frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
+        }
 
         /* 1. Raw Transparent CAN Frame Forwarding -> ROS 2 (/from_can_bus) */
         if (g_bridge.zenoh_ready) {
@@ -578,6 +605,10 @@ static void zenoh_engine_task(void const *arg) {
         uint32_t esr = CAN1->ESR;
         uint8_t tec = (uint8_t)((esr >> 16) & 0xFF);
         uint8_t rec = (uint8_t)((esr >> 24) & 0xFF);
+        uint8_t lec = (uint8_t)((esr >> 4) & 0x07);
+        static const char *const lec_names[] = {
+            "None", "Stuff", "Form", "Ack", "BitRec", "BitDom", "CRC", "SW"
+        };
         bool boff = (esr & (1U << 2)) != 0;
         bool pass = (esr & (1U << 1)) != 0;
 
@@ -597,10 +628,11 @@ static void zenoh_engine_task(void const *arg) {
         /* Red LED alert on bus errors or topic silence */
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, (boff || pass || timeout_alert) ? GPIO_PIN_SET : GPIO_PIN_RESET);
 
-        printf("[Stats] CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | TEC:%u REC:%u | DROP:%lu\r\n",
+        printf("[Stats] CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | TEC:%u REC:%u LEC:%s(%u)%s%s | DROP:%lu\r\n",
                (unsigned long)g_bridge.can_to_zenoh_count, (unsigned long)g_bridge.zenoh_to_can_count,
                (unsigned long)g_bridge.raw_rx_frames, (unsigned long)g_bridge.raw_tx_frames,
-               tec, rec, (unsigned long)g_bridge.drop_count);
+               tec, rec, lec_names[lec], lec, boff ? " [BOFF]" : "", pass ? " [PASS]" : "",
+               (unsigned long)g_bridge.drop_count);
     }
 }
 
