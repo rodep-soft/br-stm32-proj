@@ -11,7 +11,7 @@ TOOLCHAIN    := cmake/gcc-arm-none-eabi.cmake
 # Python Code Generator
 PYTHON       := python3
 CODEGEN      := tools/msg2cdr.py
-MSG_DIR      := test_msgs/msg
+MSG_DIR      := msg
 GEN_DIR      := Core/Inc/generated
 
 # Flashing Tool Settings
