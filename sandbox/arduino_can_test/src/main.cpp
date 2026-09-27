@@ -6,6 +6,8 @@
 #include <SPI.h>
 
 MCP_CAN CAN0(10);     // Set CS to pin 10
+                      //
+uint32_t counter = 0;
 
 void setup()
 {
@@ -18,17 +20,24 @@ void setup()
   CAN0.setMode(MCP_NORMAL);   // Change to normal mode to allow messages to be transmitted
 }
 
-byte data[8] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07};
 
 void loop()
 {
+  byte data[4];
+  data[0] = (counter & 0xFF);
+  data[1] = (counter >> 8) & 0xFF;
+  data[2] = (counter >> 16) & 0xFF;
+  data[3] = (counter >> 24) & 0xFF;
+
   // send data:  ID = 0x100, Standard CAN Frame, Data length = 8 bytes, 'data' = array of data bytes to send
-  byte sndStat = CAN0.sendMsgBuf(0x400, 0, 8, data);
+  byte sndStat = CAN0.sendMsgBuf(0x400, 0, 4, data);
+
   if(sndStat == CAN_OK){
     Serial.println("Message Sent Successfully!");
   } else {
     Serial.println("Error Sending Message...");
   }
+  counter++;
   delay(100);   // send data per 100ms
 }
 

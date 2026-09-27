@@ -107,7 +107,7 @@ static void can_hardware_init(void) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         if (t->dir == BRIDGE_DIR_ROS_TO_CAN) continue;
 
-        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+        if (t->dir == BRIDGE_DIR_CAN_RECV) {
             if (id_count < 56) {
                 filter_slots[id_count++] = (uint16_t)(((t->can_base_id) & 0x7FF) << 5);
             }
@@ -308,7 +308,7 @@ static void bridge_worker_task(void const *arg) {
             const bridge_topic_t *t = &g_bridge_topics[i];
 
             /* Standalone CAN Receiver: log to serial (USART3 / ST-LINK VCP) and toggle LED */
-            if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+            if (t->dir == BRIDGE_DIR_CAN_RECV) {
                 if (frame.id == t->can_base_id) {
                     HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
                     printf("[CAN-RX] %s (0x%03lX): ", t->topic_name, (unsigned long)t->can_base_id);
@@ -416,7 +416,7 @@ static void zenoh_engine_task(void const *arg) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         topic_runtime_t *rt = &g_runtimes[i];
 
-        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+        if (t->dir == BRIDGE_DIR_CAN_RECV) {
             printf("  [RECV] %-16s : CAN 0x%03lX (Standalone Receiver)\r\n",
                    t->topic_name, (unsigned long)t->can_base_id);
             continue;

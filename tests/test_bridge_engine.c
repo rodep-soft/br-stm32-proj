@@ -321,7 +321,7 @@ static void test_hardware_filter_id_generation(void) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         if (t->dir == BRIDGE_DIR_ROS_TO_CAN) continue;
 
-        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+        if (t->dir == BRIDGE_DIR_CAN_RECV) {
             filter_ids[count++] = t->can_base_id;
             continue;
         }
@@ -371,7 +371,6 @@ static void test_ping_roundtrip(void) {
 
     robot_msgs_Ping orig = {
         .count = 4294967290U,
-        .value = -123.456f,
     };
 
     uint8_t cdr_buf[64];
@@ -388,7 +387,6 @@ static void test_ping_roundtrip(void) {
 
     ASSERT_TRUE(robot_msgs_Ping_deserialize(&reader, &restored));
     ASSERT_TRUE(restored.count == orig.count);
-    ASSERT_FLOAT_EQ(restored.value, orig.value);
 
     printf("       test_ping_roundtrip: PASSED ✅\n");
 }
@@ -399,7 +397,7 @@ static void test_ping_roundtrip(void) {
 static bool simulate_can_receive(const mock_can_frame_t *rx_frame, robot_msgs_Ping *out_ping) {
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
-        if (t->dir == BRIDGE_DIR_CAN_ECHO) {
+        if (t->dir == BRIDGE_DIR_CAN_RECV) {
             if (rx_frame->id == t->can_base_id) {
                 if (rx_frame->dlc == sizeof(robot_msgs_Ping)) {
                     memcpy(out_ping, rx_frame->data, sizeof(robot_msgs_Ping));
@@ -414,21 +412,21 @@ static bool simulate_can_receive(const mock_can_frame_t *rx_frame, robot_msgs_Pi
 static void test_can_receive_standalone(void) {
     printf("[TEST] Running test_can_receive_standalone...\n");
 
-    const bridge_topic_t *echo_topic = NULL;
+    const bridge_topic_t *recv_topic = NULL;
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
-        if (g_bridge_topics[i].dir == BRIDGE_DIR_CAN_ECHO) {
-            echo_topic = &g_bridge_topics[i];
+        if (g_bridge_topics[i].dir == BRIDGE_DIR_CAN_RECV) {
+            recv_topic = &g_bridge_topics[i];
             break;
         }
     }
 
-    ASSERT_TRUE(echo_topic != NULL);
-    ASSERT_TRUE(strcmp(echo_topic->topic_name, "ping_echo") == 0);
-    ASSERT_TRUE(echo_topic->can_base_id == 0x400);
-    ASSERT_TRUE(echo_topic->msg_size == sizeof(robot_msgs_Ping));
-    ASSERT_TRUE(echo_topic->serialize_fn != NULL);
-    ASSERT_TRUE(echo_topic->deserialize_fn != NULL);
-    ASSERT_TRUE(echo_topic->print_fn != NULL);
+    ASSERT_TRUE(recv_topic != NULL);
+    ASSERT_TRUE(strcmp(recv_topic->topic_name, "ping_echo") == 0);
+    ASSERT_TRUE(recv_topic->can_base_id == 0x400);
+    ASSERT_TRUE(recv_topic->msg_size == sizeof(robot_msgs_Ping));
+    ASSERT_TRUE(recv_topic->serialize_fn != NULL);
+    ASSERT_TRUE(recv_topic->deserialize_fn != NULL);
+    ASSERT_TRUE(recv_topic->print_fn != NULL);
 
     /* Verify all registered topics have print_fn enabled */
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
@@ -438,7 +436,6 @@ static void test_can_receive_standalone(void) {
     /* 1. Simulate receiving a robot_msgs_Ping message */
     robot_msgs_Ping tx_ping = {
         .count = 1024,
-        .value = 3.14159f,
     };
 
     mock_can_frame_t rx_frame;
@@ -451,7 +448,6 @@ static void test_can_receive_standalone(void) {
 
     ASSERT_TRUE(ok);
     ASSERT_TRUE(parsed_ping.count == tx_ping.count);
-    ASSERT_FLOAT_EQ(parsed_ping.value, tx_ping.value);
 
     /* 2. Unregistered ID should not match */
     mock_can_frame_t unreg_frame = {.id = 0x402, .dlc = 8};
