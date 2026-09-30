@@ -56,7 +56,7 @@ set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
 set(CHECK_THREADS OFF CACHE BOOL "Disable check threads" FORCE)
 
-add_subdirectory(third_party/zenoh-pico)
+add_subdirectory(../third_party/zenoh-pico ${CMAKE_CURRENT_BINARY_DIR}/zenoh-pico)
 target_link_libraries(zenohpico_static PUBLIC stm32cubemx)
 
 # Configure Micro-CDR
@@ -66,7 +66,7 @@ set(UCDR_BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
 set(UCDR_PIC OFF CACHE BOOL "Disable PIC" FORCE)
 set(UCDR_ISOLATED_INSTALL OFF CACHE BOOL "Disable isolated install" FORCE)
 
-add_subdirectory(third_party/micro-cdr)
+add_subdirectory(../third_party/micro-cdr ${CMAKE_CURRENT_BINARY_DIR}/micro-cdr)
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
