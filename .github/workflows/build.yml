@@ -2,9 +2,9 @@ name: Build STM32 Firmware
 
 on:
   push:
-    branches: [ main, main-h5 ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, main-h5 ]
+    branches: [ main ]
 
 jobs:
   build-h5:
