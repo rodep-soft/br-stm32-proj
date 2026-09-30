@@ -56,16 +56,16 @@ jobs:
 
       - name: Print Firmware Memory Usage (H5)
         run: |
-          arm-none-eabi-size br-stm32/build/br-stm32.elf
+          arm-none-eabi-size br-stm32/build/br-stm32-h5.elf
 
       - name: Upload Firmware Artifacts (H5)
         uses: actions/upload-artifact@v4
         with:
           name: stm32h5-firmware
           path: |
-            br-stm32/build/br-stm32.elf
-            br-stm32/build/br-stm32.bin
-            br-stm32/build/br-stm32.map
+            br-stm32/build/br-stm32-h5.elf
+            br-stm32/build/br-stm32-h5.bin
+            br-stm32/build/br-stm32-h5.map
 
   build-f7:
     name: Build F7 (STM32F767) Firmware
