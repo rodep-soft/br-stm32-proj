@@ -56,16 +56,16 @@ jobs:
 
       - name: Print Firmware Memory Usage (H5)
         run: |
-          arm-none-eabi-size br-stm32/build/br-stm32.elf
+          arm-none-eabi-size br-stm32/build/br-stm32-h5e4vkt6.elf
 
       - name: Upload Firmware Artifacts (H5)
         uses: actions/upload-artifact@v4
         with:
           name: stm32h5-firmware
           path: |
-            br-stm32/build/br-stm32.elf
-            br-stm32/build/br-stm32.bin
-            br-stm32/build/br-stm32.map
+            br-stm32/build/br-stm32-h5e4vkt6.elf
+            br-stm32/build/br-stm32-h5e4vkt6.bin
+            br-stm32/build/br-stm32-h5e4vkt6.map
 
   build-f7:
     name: Build F7 (STM32F767) Firmware
@@ -116,13 +116,13 @@ jobs:
 
       - name: Print Firmware Memory Usage (F7)
         run: |
-          arm-none-eabi-size br-stm32-f7/build/br-stm32.elf
+          arm-none-eabi-size br-stm32-f7/build/br-stm32-f767zi.elf
 
       - name: Upload Firmware Artifacts (F7)
         uses: actions/upload-artifact@v4
         with:
           name: stm32f7-firmware
           path: |
-            br-stm32-f7/build/br-stm32.elf
-            br-stm32-f7/build/br-stm32.bin
-            br-stm32-f7/build/br-stm32.map
+            br-stm32-f7/build/br-stm32-f767zi.elf
+            br-stm32-f7/build/br-stm32-f767zi.bin
+            br-stm32-f7/build/br-stm32-f767zi.map
