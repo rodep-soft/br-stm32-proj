@@ -50,11 +50,14 @@ if(MSG_FILES)
         VERBATIM
     )
     add_custom_target(generate_messages DEPENDS ${GEN_DIR}/generated.stamp)
-    add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
 endif()
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
+
+if(MSG_FILES)
+    add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
+endif()
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
