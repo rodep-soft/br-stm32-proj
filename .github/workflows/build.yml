@@ -94,12 +94,6 @@ jobs:
           cmake --version
           ninja --version
 
-      - name: Debug workspace
-        run: |
-          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-          ls -la
-          ls -la br-stm32-f767zi/cmake/
-
       - name: Generate ROS 2 message headers (F7)
         run: |
           python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32-f767zi/Core/Inc/generated
