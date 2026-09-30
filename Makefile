@@ -1,24 +1,37 @@
 # ==============================================================================
-# Makefile for STM32H5 Zenoh-Pico Project (Nix & Native Compatible)
+# Makefile for STM32 F7/H5 Zenoh-Pico Project (Nix & Native Compatible)
 # ==============================================================================
 
-PROJECT_NAME := br-stm32
-PROJECT_DIR  := br-stm32
+TARGET       ?= h5
+
+ifeq ($(TARGET),f7)
+  PROJECT_NAME := br-stm32-f7
+  PROJECT_DIR  := br-stm32-f7
+  TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
+  OPENOCD_TARGET := stm32f7x.cfg
+  ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
+  BIN_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).bin
+else
+  PROJECT_NAME := br-stm32
+  PROJECT_DIR  := br-stm32
+  TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
+  OPENOCD_TARGET := stm32h5x.cfg
+  ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
+  BIN_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).bin
+endif
+
 BUILD_DIR    := $(PROJECT_DIR)/build
 TEST_DIR     := tests
 TEST_BUILD   := tests/build
-TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
+GEN_DIR      := $(PROJECT_DIR)/Core/Inc/generated
 
 # Python Code Generator
 PYTHON       := python3
 CODEGEN      := tools/msg2cdr.py
 MSG_DIR      := msg
-GEN_DIR      := $(PROJECT_DIR)/Core/Inc/generated
 
 # Flashing Tool Settings
 FLASH_ADDR   := 0x08000000
-BIN_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).bin
-ELF_FILE     := $(BUILD_DIR)/$(PROJECT_NAME).elf
 
 # Detect environment: check if tools are directly available or via Nix
 HAS_ARM_GCC  := $(shell command -v arm-none-eabi-gcc 2>/dev/null)
@@ -208,7 +221,7 @@ endif
 
 do-flash-openocd:
 	@echo "==> [Flash] Writing $(BIN_FILE) via OpenOCD..."
-	@openocd -f interface/stlink.cfg -f target/stm32h5x.cfg \
+	@openocd -f interface/stlink.cfg -f target/$(OPENOCD_TARGET) \
 		-c "program $(BIN_FILE) $(FLASH_ADDR) reset exit"
 
 ## -----------------------------------------------------------------------------
@@ -318,3 +331,7 @@ help:
 	@echo "  make size             - Show firmware Flash/RAM consumption"
 	@echo "  make msg              - Generate C headers from .msg only"
 	@echo "  make clean            - Remove all build artifacts and generated headers"
+	@echo ""
+	@echo "Target selection:"
+	@echo "  make TARGET=h5 build  - Build for STM32H5 (default)"
+	@echo "  make TARGET=f7 build  - Build for STM32F7"
