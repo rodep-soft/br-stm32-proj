@@ -2,13 +2,13 @@ name: Build STM32 Firmware
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, main-h5 ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, main-h5 ]
 
 jobs:
-  build:
-    name: Build Firmware with arm-none-eabi-gcc
+  build-h5:
+    name: Build H5 (STM32H5E4) Firmware
     runs-on: ubuntu-latest
 
     steps:
@@ -34,35 +34,95 @@ jobs:
           cmake --version
           ninja --version
 
-      - name: Generate ROS 2 message headers
+      - name: Generate ROS 2 message headers (H5)
         run: |
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir Core/Inc/generated
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32/Core/Inc/generated
 
-      - name: Build and Run Host Unit Tests
+      - name: Build and Run Host Unit Tests (H5)
         run: |
-          cmake -B tests/build -S tests -G Ninja
+          cmake -B tests/build -S tests -G Ninja -DPROJECT_INC_DIR=${{ github.workspace }}/br-stm32/Core/Inc
           cmake --build tests/build
           ctest --test-dir tests/build --output-on-failure
 
-      - name: Configure CMake
+      - name: Configure CMake (H5)
         run: |
-          cmake -B build -G Ninja \
+          cmake -B br-stm32/build -S br-stm32 -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake
+            -DCMAKE_TOOLCHAIN_FILE=br-stm32/cmake/gcc-arm-none-eabi.cmake
 
-      - name: Build Firmware
+      - name: Build Firmware (H5)
         run: |
-          cmake --build build --parallel
+          cmake --build br-stm32/build --parallel
 
-      - name: Print Firmware Memory Usage
+      - name: Print Firmware Memory Usage (H5)
         run: |
-          arm-none-eabi-size build/br-stm32.elf
+          arm-none-eabi-size br-stm32/build/br-stm32.elf
 
-      - name: Upload Firmware Artifacts
+      - name: Upload Firmware Artifacts (H5)
         uses: actions/upload-artifact@v4
         with:
-          name: stm32-firmware
+          name: stm32h5-firmware
           path: |
-            build/br-stm32.elf
-            build/br-stm32.bin
-            build/br-stm32.map
+            br-stm32/build/br-stm32.elf
+            br-stm32/build/br-stm32.bin
+            br-stm32/build/br-stm32.map
+
+  build-f7:
+    name: Build F7 (STM32F767) Firmware
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install ARM GNU Toolchain and Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi \
+            libstdc++-arm-none-eabi-newlib \
+            ninja-build \
+            cmake \
+            python3
+
+      - name: Verify Toolchain
+        run: |
+          arm-none-eabi-gcc --version
+          cmake --version
+          ninja --version
+
+      - name: Generate ROS 2 message headers (F7)
+        run: |
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32-f7/Core/Inc/generated
+
+      - name: Build and Run Host Unit Tests (F7)
+        run: |
+          cmake -B tests/build -S tests -G Ninja -DPROJECT_INC_DIR=${{ github.workspace }}/br-stm32-f7/Core/Inc
+          cmake --build tests/build
+          ctest --test-dir tests/build --output-on-failure
+
+      - name: Configure CMake (F7)
+        run: |
+          cmake -B br-stm32-f7/build -S br-stm32-f7 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE=br-stm32-f7/cmake/gcc-arm-none-eabi.cmake
+
+      - name: Build Firmware (F7)
+        run: |
+          cmake --build br-stm32-f7/build --parallel
+
+      - name: Print Firmware Memory Usage (F7)
+        run: |
+          arm-none-eabi-size br-stm32-f7/build/br-stm32-f7.elf
+
+      - name: Upload Firmware Artifacts (F7)
+        uses: actions/upload-artifact@v4
+        with:
+          name: stm32f7-firmware
+          path: |
+            br-stm32-f7/build/br-stm32-f7.elf
+            br-stm32-f7/build/br-stm32-f7.bin
+            br-stm32-f7/build/br-stm32-f7.map
