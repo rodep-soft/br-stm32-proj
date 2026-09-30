@@ -5,15 +5,15 @@
 TARGET       ?= h5
 
 ifeq ($(TARGET),f7)
-  PROJECT_NAME := br-stm32-f7
-  PROJECT_DIR  := br-stm32-f7
+  PROJECT_NAME := br-stm32-f767zi
+  PROJECT_DIR  := br-stm32-f767zi
   TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
   OPENOCD_TARGET := stm32f7x.cfg
   ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
   BIN_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).bin
 else
   PROJECT_NAME := br-stm32-h5e4vkt6
-  PROJECT_DIR  := br-stm32
+  PROJECT_DIR  := br-stm32-h5e4vkt6
   TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
   OPENOCD_TARGET := stm32h5x.cfg
   ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
@@ -266,7 +266,7 @@ endif
 
 do-test:
 	@echo "==> [Test] Building and running host unit tests..."
-	@cmake -B $(TEST_BUILD) -S $(TEST_DIR) -G Ninja
+	@cmake -B $(TEST_BUILD) -S $(TEST_DIR) -G Ninja -DPROJECT_INC_DIR=$(CURDIR)/$(PROJECT_DIR)/Core/Inc
 	@cmake --build $(TEST_BUILD)
 	@./$(TEST_BUILD)/test_serialization
 	@./$(TEST_BUILD)/test_bridge_engine
