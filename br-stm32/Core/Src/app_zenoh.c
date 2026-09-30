@@ -39,6 +39,7 @@ typedef struct {
     uint8_t  dlc;
     bool     is_extended;
     bool     is_rtr;
+    bool     is_fd;
     bridge_can_bus_t bus;
     uint8_t  data[64];
 } can_frame_t;
@@ -70,6 +71,12 @@ static uint32_t can_fd_dlc_code(uint8_t length)
                    length <= 32U ? 13U :
                    length <= 48U ? 14U : 15U;
     return codes[code];
+}
+
+static bool can_frame_matches_route(const can_frame_t *frame, const bridge_topic_t *topic)
+{
+    const bool route_is_fd = topic->frame_mode == BRIDGE_FRAME_FD;
+    return frame->bus == topic->bus && frame->is_fd == route_is_fd;
 }
 
 extern FDCAN_HandleTypeDef hfdcan1;
@@ -235,11 +242,16 @@ void FDCAN2_IT0_IRQHandler(void) {
 }
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
-    FDCAN_RxHeaderTypeDef rx_hdr;
-    can_frame_t frame;
+    BaseType_t higher_priority_task_woken = pdFALSE;
 
-    if ((it_flags & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0 &&
-        HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx_hdr, frame.data) == HAL_OK) {
+    while ((it_flags & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != 0 &&
+           HAL_FDCAN_GetRxFifoFillLevel(hfdcan, FDCAN_RX_FIFO0) != 0U) {
+        FDCAN_RxHeaderTypeDef rx_hdr;
+        can_frame_t frame = {0};
+        if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &rx_hdr, frame.data) != HAL_OK) {
+            g_bridge.drop_count++;
+            break;
+        }
         if (g_rx_queue != NULL) {
             if (rx_hdr.IdType == FDCAN_EXTENDED_ID) {
                 frame.id = rx_hdr.Identifier;
@@ -249,18 +261,18 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
                 frame.is_extended = false;
             }
             frame.is_rtr = (rx_hdr.RxFrameType == FDCAN_REMOTE_FRAME);
+            frame.is_fd = (rx_hdr.FDFormat == FDCAN_FD_CAN);
             frame.dlc = can_fd_payload_length(rx_hdr.DataLength);
             frame.bus = (hfdcan->Instance == FDCAN2) ? BRIDGE_FDCAN2 : BRIDGE_FDCAN1;
 
-            BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-            if (xQueueSendFromISR(g_rx_queue, &frame, &xHigherPriorityTaskWoken) == pdTRUE) {
+            if (xQueueSendFromISR(g_rx_queue, &frame, &higher_priority_task_woken) == pdTRUE) {
                 g_bridge.raw_rx_frames++;
             } else {
                 g_bridge.drop_count++;
             }
-            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
         }
     }
+    portYIELD_FROM_ISR(higher_priority_task_woken);
 }
 
 /* ───────────────────── Network Helpers ─────────────────────────────── */
@@ -402,7 +414,8 @@ static void bridge_worker_task(void *arg) {
         if (g_bridge.zenoh_ready) {
             for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
                 const bridge_topic_t *t = &g_bridge_topics[i];
-                if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
+                if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW &&
+                    can_frame_matches_route(&frame, t)) {
                     topic_runtime_t *rt = &g_runtimes[i];
 
                     ucdrBuffer ub;
@@ -444,6 +457,7 @@ static void bridge_worker_task(void *arg) {
         /* 2. Topic-specific CAN Handlers (Standalone Receiver & Multi-frame Reassembly) */
         for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
             const bridge_topic_t *t = &g_bridge_topics[i];
+            if (!can_frame_matches_route(&frame, t)) continue;
 
             /* Standalone CAN Receiver: log to serial (USART3 / ST-LINK VCP) and toggle LED */
             if (t->dir == BRIDGE_DIR_CAN_RECV) {
@@ -522,7 +536,7 @@ static void zenoh_engine_task(void *arg) {
     (void)arg;
 
     printf("\r\n==================================================\r\n");
-    printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
+    printf("  STM32H5 Ultra-Thin Zenoh-CAN Bridge             \r\n");
     printf("==================================================\r\n");
 
     wait_for_network();
