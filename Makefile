@@ -12,7 +12,7 @@ ifeq ($(TARGET),f7)
   ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
   BIN_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).bin
 else
-  PROJECT_NAME := br-stm32
+  PROJECT_NAME := br-stm32-h5e4vkt6
   PROJECT_DIR  := br-stm32
   TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
   OPENOCD_TARGET := stm32h5x.cfg

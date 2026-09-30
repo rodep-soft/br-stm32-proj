@@ -34,10 +34,6 @@ jobs:
           cmake --version
           ninja --version
 
-      - name: Generate ROS 2 message headers (H5)
-        run: |
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32/Core/Inc/generated
-
       - name: Build and Run Host Unit Tests (H5)
         run: |
           cmake -B tests/build -S tests -G Ninja -DPROJECT_INC_DIR=${{ github.workspace }}/br-stm32/Core/Inc
@@ -93,10 +89,6 @@ jobs:
           arm-none-eabi-gcc --version
           cmake --version
           ninja --version
-
-      - name: Generate ROS 2 message headers (F7)
-        run: |
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32-f7/Core/Inc/generated
 
       - name: Build and Run Host Unit Tests (F7)
         run: |
