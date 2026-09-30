@@ -48,7 +48,7 @@ jobs:
         run: |
           cmake -B br-stm32/build -S br-stm32 -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_TOOLCHAIN_FILE=br-stm32/cmake/gcc-arm-none-eabi.cmake
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/br-stm32/cmake/gcc-arm-none-eabi.cmake
 
       - name: Build Firmware (H5)
         run: |
@@ -108,7 +108,7 @@ jobs:
         run: |
           cmake -B br-stm32-f7/build -S br-stm32-f7 -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_TOOLCHAIN_FILE=br-stm32-f7/cmake/gcc-arm-none-eabi.cmake
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/br-stm32-f7/cmake/gcc-arm-none-eabi.cmake
 
       - name: Build Firmware (F7)
         run: |
