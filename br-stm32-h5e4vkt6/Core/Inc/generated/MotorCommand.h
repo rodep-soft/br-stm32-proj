@@ -16,7 +16,7 @@ extern "C" {
 #define robot_msgs_MotorCommand_PACKAGE "robot_msgs"
 #define robot_msgs_MotorCommand_MSG_NAME "MotorCommand"
 #define robot_msgs_MotorCommand_DDS_TYPE "robot_msgs::msg::dds_::MotorCommand_"
-#define robot_msgs_MotorCommand_TYPE_HASH "RIHS01_26339e4d53ed3f53deac97e0dd498c5ae80a4d7e558b823933d6f5faec0e2404"
+#define robot_msgs_MotorCommand_TYPE_HASH "RIHS01_3f79b554bfaac5c2839e389afc5f70fb05d77a18a0b8c1245d3ff90db76e4829"
 
 /* Macro to generate Zenoh KeyExpr: <domain_id>/<topic_name>/<dds_type>/<type_hash> */
 #define robot_msgs_MotorCommand_KEYEXPR(domain_id, topic_name) \

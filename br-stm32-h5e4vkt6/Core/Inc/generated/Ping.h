@@ -16,7 +16,7 @@ extern "C" {
 #define robot_msgs_Ping_PACKAGE "robot_msgs"
 #define robot_msgs_Ping_MSG_NAME "Ping"
 #define robot_msgs_Ping_DDS_TYPE "robot_msgs::msg::dds_::Ping_"
-#define robot_msgs_Ping_TYPE_HASH "RIHS01_6de552f2945161b057a01830b173b4abc4539c5165dd7642e596db603cd0f568"
+#define robot_msgs_Ping_TYPE_HASH "RIHS01_3342d84a4feda41ce1efaba93ef02c620526cbdb5998148b7e6071d26a9e132f"
 
 /* Macro to generate Zenoh KeyExpr: <domain_id>/<topic_name>/<dds_type>/<type_hash> */
 #define robot_msgs_Ping_KEYEXPR(domain_id, topic_name) \
@@ -25,7 +25,6 @@ extern "C" {
 /* Message structure */
 typedef struct {
     uint32_t count;
-    float value;
 } robot_msgs_Ping;
 
 /**
@@ -41,7 +40,6 @@ static inline bool robot_msgs_Ping_serialize(ucdrBuffer* ub, const robot_msgs_Pi
 
     // 2. Serialize fields
     ucdr_serialize_uint32_t(ub, topic->count);
-    ucdr_serialize_float(ub, topic->value);
 
     return !ucdr_buffer_has_error(ub);
 }
@@ -61,7 +59,6 @@ static inline bool robot_msgs_Ping_deserialize(ucdrBuffer* ub, robot_msgs_Ping* 
 
     // 2. Deserialize fields
     ucdr_deserialize_uint32_t(ub, &topic->count);
-    ucdr_deserialize_float(ub, &topic->value);
 
     return !ucdr_buffer_has_error(ub);
 }
@@ -71,9 +68,8 @@ static inline bool robot_msgs_Ping_deserialize(ucdrBuffer* ub, robot_msgs_Ping* 
  */
 static inline void robot_msgs_Ping_print(const robot_msgs_Ping* topic) {
     if (topic == NULL) return;
-    printf("[Ping] count=%lu value=%.2f\r\n",
-        (unsigned long)(topic->count),
-        (double)(topic->value));
+    printf("[Ping] count=%lu\r\n",
+        (unsigned long)(topic->count));
 }
 
 #ifdef __cplusplus

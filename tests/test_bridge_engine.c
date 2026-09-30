@@ -18,7 +18,7 @@
 #include <float.h>
 
 #include <ucdr/microcdr.h>
-#include "app_config.h"
+#include "app_config_test.h"
 
 #define ASSERT_TRUE(cond) do { \
     if (!(cond)) { \

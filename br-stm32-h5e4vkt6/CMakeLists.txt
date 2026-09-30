@@ -31,8 +31,32 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
+# Generate Micro-CDR headers from .msg files
+set(MSG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../msg")
+set(GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/generated")
+file(MAKE_DIRECTORY ${GEN_DIR})
+file(GLOB MSG_FILES "${MSG_DIR}/*.msg")
+if(MSG_FILES)
+    add_custom_command(
+        OUTPUT ${GEN_DIR}/generated.stamp
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package robot_msgs
+            --msg-dir ${MSG_DIR}
+            --out-dir ${GEN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E touch ${GEN_DIR}/generated.stamp
+        DEPENDS ${MSG_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+        COMMENT "Generating Micro-CDR headers from .msg files"
+        VERBATIM
+    )
+    add_custom_target(generate_messages DEPENDS ${GEN_DIR}/generated.stamp)
+endif()
+
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
+
+if(MSG_FILES)
+    add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
+endif()
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

@@ -16,7 +16,7 @@ extern "C" {
 #define robot_msgs_ImuData_PACKAGE "robot_msgs"
 #define robot_msgs_ImuData_MSG_NAME "ImuData"
 #define robot_msgs_ImuData_DDS_TYPE "robot_msgs::msg::dds_::ImuData_"
-#define robot_msgs_ImuData_TYPE_HASH "RIHS01_5cb16eb9e4226d48b9f1398edb9130616461a455244c76e1c9eceea4fb93284e"
+#define robot_msgs_ImuData_TYPE_HASH "RIHS01_14971ca9f3b2aeb125b093876b1c4e7702b2ca1fac92ed27e39a7e102194255f"
 
 /* Macro to generate Zenoh KeyExpr: <domain_id>/<topic_name>/<dds_type>/<type_hash> */
 #define robot_msgs_ImuData_KEYEXPR(domain_id, topic_name) \
