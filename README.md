@@ -1,6 +1,6 @@
 # br-stm32-proj
 
-STM32F767ZI (Nucleo-144) + Zenoh-Picoを用いたbr制御用ファームウェア. zenohを使ってUDP通信でros2と統合することができる.
+STM32H5 + Zenoh-Picoを用いたbr制御用ファームウェア. zenohを使ってUDP通信でros2と統合することができる.
 中継スクリプトやブリッジを一切介さず、ros2側からノードおよびトピックとして認識されます。
 
 ---

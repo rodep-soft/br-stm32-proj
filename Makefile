@@ -1,5 +1,5 @@
 # ==============================================================================
-# Makefile for STM32F767ZI Zenoh-Pico Project (Nix & Native Compatible)
+# Makefile for STM32H5 Zenoh-Pico Project (Nix & Native Compatible)
 # ==============================================================================
 
 PROJECT_NAME := br-stm32

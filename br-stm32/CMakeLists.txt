@@ -45,6 +45,10 @@ set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
 set(CHECK_THREADS OFF CACHE BOOL "Disable check threads" FORCE)
 add_subdirectory(../third_party/zenoh-pico ${CMAKE_CURRENT_BINARY_DIR}/zenoh-pico)
 target_link_libraries(zenohpico_static PUBLIC stm32cubemx)
+target_compile_options(zenohpico_static PRIVATE
+    -Wno-error=incompatible-pointer-types
+    -Wno-incompatible-pointer-types
+)
 
 set(UCDR_SUPERBUILD OFF CACHE BOOL "Disable superbuild" FORCE)
 set(UCDR_BUILD_TESTS OFF CACHE BOOL "Disable tests" FORCE)

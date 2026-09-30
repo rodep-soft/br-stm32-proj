@@ -1,5 +1,5 @@
 {
-  description = "STM32F767ZI Zenoh-Pico & Micro-CDR development environment";
+  description = "STM32H5 Zenoh-Pico & Micro-CDR development environment";
 
   nixConfig = {
     extra-substituters = [
@@ -45,7 +45,7 @@
 
           shellHook = ''
             echo "=========================================================="
-            echo "  STM32F767ZI Zenoh-Pico Dev Shell (Nix Flake)"
+            echo "  STM32H5 Zenoh-Pico Dev Shell (Nix Flake)"
             echo "=========================================================="
             echo "Compiler: $(arm-none-eabi-gcc --version | head -n 1)"
             echo "CMake:    $(cmake --version | head -n 1)"
