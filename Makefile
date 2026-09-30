@@ -3,16 +3,17 @@
 # ==============================================================================
 
 PROJECT_NAME := br-stm32
-BUILD_DIR    := build
+PROJECT_DIR  := br-stm32
+BUILD_DIR    := $(PROJECT_DIR)/build
 TEST_DIR     := tests
 TEST_BUILD   := tests/build
-TOOLCHAIN    := cmake/gcc-arm-none-eabi.cmake
+TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
 
 # Python Code Generator
 PYTHON       := python3
 CODEGEN      := tools/msg2cdr.py
 MSG_DIR      := msg
-GEN_DIR      := Core/Inc/generated
+GEN_DIR      := $(PROJECT_DIR)/Core/Inc/generated
 
 # Flashing Tool Settings
 FLASH_ADDR   := 0x08000000
@@ -153,8 +154,8 @@ else
 endif
 
 do-build:
-	@echo "==> [Build] Configuring CMake with Ninja..."
-	@cmake -B $(BUILD_DIR) -G Ninja \
+	@echo "==> [Build] Configuring CMake..."
+	@cmake -S $(PROJECT_DIR) -B $(BUILD_DIR) -G "Unix Makefiles" \
 		-DCMAKE_BUILD_TYPE=Debug \
 		-DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN)
 	@echo "==> [Build] Compiling STM32 Firmware..."
@@ -207,7 +208,7 @@ endif
 
 do-flash-openocd:
 	@echo "==> [Flash] Writing $(BIN_FILE) via OpenOCD..."
-	@openocd -f interface/stlink.cfg -f target/stm32f7x.cfg \
+	@openocd -f interface/stlink.cfg -f target/stm32h5x.cfg \
 		-c "program $(BIN_FILE) $(FLASH_ADDR) reset exit"
 
 ## -----------------------------------------------------------------------------

@@ -37,6 +37,22 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
+set(ZP_PLATFORM "freertos_lwip" CACHE STRING "Zenoh-Pico platform" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static lib" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
+set(CHECK_THREADS OFF CACHE BOOL "Disable check threads" FORCE)
+add_subdirectory(../third_party/zenoh-pico ${CMAKE_CURRENT_BINARY_DIR}/zenoh-pico)
+target_link_libraries(zenohpico_static PUBLIC stm32cubemx)
+
+set(UCDR_SUPERBUILD OFF CACHE BOOL "Disable superbuild" FORCE)
+set(UCDR_BUILD_TESTS OFF CACHE BOOL "Disable tests" FORCE)
+set(UCDR_BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
+set(UCDR_PIC OFF CACHE BOOL "Disable PIC" FORCE)
+set(UCDR_ISOLATED_INSTALL OFF CACHE BOOL "Disable isolated install" FORCE)
+add_subdirectory(../third_party/micro-cdr ${CMAKE_CURRENT_BINARY_DIR}/micro-cdr)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -44,12 +60,13 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    Core/Src/app_zenoh.c
+    Core/Src/zenoh_ros2.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
+    Core/Inc
 )
 
 # Add project symbols (macros)
@@ -63,6 +80,6 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
-
-    # Add user defined libraries
+    zenohpico_static
+    microcdr
 )
