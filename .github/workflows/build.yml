@@ -2,13 +2,13 @@ name: Build STM32 Firmware
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, main-h5 ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, main-h5 ]
 
 jobs:
-  build-h5:
-    name: Build H5 (STM32H5E4) Firmware
+  build:
+    name: Build STM32 Firmware
     runs-on: ubuntu-latest
 
     steps:
@@ -34,95 +34,59 @@ jobs:
           cmake --version
           ninja --version
 
-      - name: Generate ROS 2 message headers (H5)
+      - name: Generate ROS 2 message headers
         run: |
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32-h5e4vkt6/Core/Inc/generated
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg \
+            --out-dir br-stm32-h5e4vkt6/Core/Inc/generated
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg \
+            --out-dir br-stm32-f767zi/Core/Inc/generated
+          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg \
+            --out-dir stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/Core/Inc/generated
 
-      - name: Build and Run Host Unit Tests (H5)
+      - name: Build and Run Host Unit Tests
         run: |
-          cmake -B tests/build -S tests -G Ninja -DPROJECT_INC_DIR=${{ github.workspace }}/br-stm32-h5e4vkt6/Core/Inc
+          cmake -B tests/build -S tests -G Ninja \
+            -DPROJECT_INC_DIR=${{ github.workspace }}/br-stm32-h5e4vkt6/Core/Inc
           cmake --build tests/build
           ctest --test-dir tests/build --output-on-failure
 
-      - name: Configure CMake (H5)
+      - name: Build H5 Firmware
         run: |
           cmake -B br-stm32-h5e4vkt6/build -S br-stm32-h5e4vkt6 -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/br-stm32-h5e4vkt6/cmake/gcc-arm-none-eabi.cmake
-
-      - name: Build Firmware (H5)
-        run: |
           cmake --build br-stm32-h5e4vkt6/build --parallel
-
-      - name: Print Firmware Memory Usage (H5)
-        run: |
           arm-none-eabi-size br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.elf
 
-      - name: Upload Firmware Artifacts (H5)
-        uses: actions/upload-artifact@v4
-        with:
-          name: stm32h5-firmware
-          path: |
-            br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.elf
-            br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.bin
-            br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.map
-
-  build-f7:
-    name: Build F7 (STM32F767) Firmware
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository with submodules
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install ARM GNU Toolchain and Dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gcc-arm-none-eabi \
-            libnewlib-arm-none-eabi \
-            libstdc++-arm-none-eabi-newlib \
-            ninja-build \
-            cmake \
-            python3
-
-      - name: Verify Toolchain
-        run: |
-          arm-none-eabi-gcc --version
-          cmake --version
-          ninja --version
-
-      - name: Generate ROS 2 message headers (F7)
-        run: |
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg --out-dir br-stm32-f767zi/Core/Inc/generated
-
-      - name: Build and Run Host Unit Tests (F7)
-        run: |
-          cmake -B tests/build -S tests -G Ninja -DPROJECT_INC_DIR=${{ github.workspace }}/br-stm32-f767zi/Core/Inc
-          cmake --build tests/build
-          ctest --test-dir tests/build --output-on-failure
-
-      - name: Configure CMake (F7)
+      - name: Build F7 Firmware
         run: |
           cmake -B br-stm32-f767zi/build -S br-stm32-f767zi -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/br-stm32-f767zi/cmake/gcc-arm-none-eabi.cmake
-
-      - name: Build Firmware (F7)
-        run: |
           cmake --build br-stm32-f767zi/build --parallel
-
-      - name: Print Firmware Memory Usage (F7)
-        run: |
           arm-none-eabi-size br-stm32-f767zi/build/br-stm32-f767zi.elf
 
-      - name: Upload Firmware Artifacts (F7)
+      - name: Build G431 Encoder/BNO085 Firmware
+        run: |
+          cmake -B stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/build \
+            -S stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/cmake/gcc-arm-none-eabi.cmake
+          cmake --build stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/build --parallel
+          arm-none-eabi-size \
+            stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/build/stm32-g431KBTx_encoder_BNO085.elf
+
+      - name: Upload Firmware Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: stm32f7-firmware
+          name: stm32-firmware
           path: |
+            br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.elf
+            br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.bin
+            br-stm32-h5e4vkt6/build/br-stm32-h5e4vkt6.map
             br-stm32-f767zi/build/br-stm32-f767zi.elf
             br-stm32-f767zi/build/br-stm32-f767zi.bin
             br-stm32-f767zi/build/br-stm32-f767zi.map
+            stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/build/stm32-g431KBTx_encoder_BNO085.elf
+            stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/build/stm32-g431KBTx_encoder_BNO085.bin
+            stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/build/stm32-g431KBTx_encoder_BNO085.map
