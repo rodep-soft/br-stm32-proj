@@ -37,6 +37,10 @@ set(MSG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../msg")
 set(GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/generated")
 file(MAKE_DIRECTORY ${GEN_DIR})
 file(GLOB MSG_FILES "${MSG_DIR}/*.msg")
+set(TRANSPORT_MSG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../transport_msgs/msg")
+set(TRANSPORT_GEN_DIR "${GEN_DIR}/transport")
+file(MAKE_DIRECTORY ${TRANSPORT_GEN_DIR})
+file(GLOB TRANSPORT_MSG_FILES "${TRANSPORT_MSG_DIR}/*.msg")
 if(MSG_FILES)
     add_custom_command(
         OUTPUT ${GEN_DIR}/generated.stamp
@@ -51,12 +55,29 @@ if(MSG_FILES)
     )
     add_custom_target(generate_messages DEPENDS ${GEN_DIR}/generated.stamp)
 endif()
+if(TRANSPORT_MSG_FILES)
+    add_custom_command(
+        OUTPUT ${TRANSPORT_GEN_DIR}/generated.stamp
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package can_transport_msgs
+            --msg-dir ${TRANSPORT_MSG_DIR}
+            --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E touch ${TRANSPORT_GEN_DIR}/generated.stamp
+        DEPENDS ${TRANSPORT_MSG_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+        COMMENT "Generating CAN transport Micro-CDR headers"
+        VERBATIM
+    )
+    add_custom_target(generate_transport_messages DEPENDS ${TRANSPORT_GEN_DIR}/generated.stamp)
+endif()
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
 
 if(MSG_FILES)
     add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
+endif()
+if(TRANSPORT_MSG_FILES)
+    add_dependencies(${CMAKE_PROJECT_NAME} generate_transport_messages)
 endif()
 
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD

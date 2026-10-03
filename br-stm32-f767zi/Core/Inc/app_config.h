@@ -22,7 +22,7 @@
 #include "generated/ImuData.h"
 #include "generated/MotorCommand.h"
 #include "generated/Ping.h"
-#include "generated/Frame.h"
+#include "generated/transport_compat.h"
 
 #ifdef __cplusplus
 extern "C" {

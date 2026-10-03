@@ -350,10 +350,10 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
         if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
             const can_msgs_FDFrame *cf = (const can_msgs_FDFrame *)msg_buffer;
             id = cf->id;
-            dlc = cf->dlc;
+            dlc = cf->len;
             data = cf->data;
             is_extended = cf->is_extended;
-            is_rtr = cf->is_rtr;
+            is_rtr = false;
         } else {
             const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
             id = cf->id;
@@ -429,8 +429,7 @@ static void bridge_worker_task(void *arg) {
                         strncpy(out_frame.header.frame_id, "fdcan", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
-                        out_frame.is_rtr = frame.is_rtr;
-                        out_frame.dlc = frame.dlc;
+                        out_frame.len = frame.dlc;
                         memcpy(out_frame.data, frame.data, frame.dlc);
                         serialized = can_msgs_FDFrame_serialize(&ub, &out_frame);
                     } else {
