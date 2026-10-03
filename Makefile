@@ -157,6 +157,8 @@ msg:
 	@echo "==> [CodeGen] Generating Micro-CDR headers from .msg files..."
 	@$(PYTHON) $(CODEGEN) --package can_msgs --msg $(TRANSPORT_MSG_DIR)/Frame.msg --out-dir $(GEN_DIR)/transport
 	@$(PYTHON) $(CODEGEN) --package can_transport_msgs --msg $(TRANSPORT_MSG_DIR)/FDFrame.msg --out-dir $(GEN_DIR)/transport
+	@$(PYTHON) $(CODEGEN) --package can_transport_msgs --msg $(TRANSPORT_MSG_DIR)/TimedFrame.msg --out-dir $(GEN_DIR)/transport
+	@$(PYTHON) $(CODEGEN) --package can_transport_msgs --msg $(TRANSPORT_MSG_DIR)/TimedFDFrame.msg --out-dir $(GEN_DIR)/transport
 
 ## -----------------------------------------------------------------------------
 ## Build Targets (Auto-delegates to Nix if tools not in PATH)

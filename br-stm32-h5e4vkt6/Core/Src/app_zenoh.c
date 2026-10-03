@@ -42,6 +42,7 @@ typedef struct {
     bool     is_fd;
     bridge_can_bus_t bus;
     uint8_t  data[64];
+    uint32_t rx_tick;
 } can_frame_t;
 
 static uint8_t can_fd_payload_length(uint32_t dlc_code)
@@ -116,6 +117,8 @@ typedef struct {
 } bridge_t;
 
 static bridge_t g_bridge;
+static zenoh_ros2_pub_t g_timed_classic_pub;
+static zenoh_ros2_pub_t g_timed_fd_pub;
 
 /* ───────────────────── CAN Hardware & Filter Setup ─────────────────── */
 
@@ -270,6 +273,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
             frame.is_fd = (rx_hdr.FDFormat == FDCAN_FD_CAN);
             frame.dlc = can_fd_payload_length(rx_hdr.DataLength);
             frame.bus = (hfdcan->Instance == FDCAN2) ? BRIDGE_FDCAN2 : BRIDGE_FDCAN1;
+            frame.rx_tick = HAL_GetTick();
 
             if (xQueueSendFromISR(g_rx_queue, &frame, &higher_priority_task_woken) == pdTRUE) {
                 g_bridge.raw_rx_frames++;
@@ -469,6 +473,33 @@ static void bridge_worker_task(void *arg) {
                     }
                     if (serialized) {
                         zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
+                        ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
+                        if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
+                            can_transport_msgs_TimedFDFrame timed = {0};
+                            strncpy(timed.header.frame_id, "fdcan", sizeof(timed.header.frame_id) - 1);
+                            timed.id = frame.id;
+                            timed.is_extended = frame.is_extended;
+                            timed.len = frame.dlc;
+                            memcpy(timed.data, frame.data, timed.len);
+                            timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
+                            timed.timestamp_valid = false;
+                            if (can_transport_msgs_TimedFDFrame_serialize(&ub, &timed)) {
+                                zenoh_ros2_pub_send(&g_timed_fd_pub, cdr_buf, ucdr_buffer_length(&ub));
+                            }
+                        } else {
+                            can_transport_msgs_TimedFrame timed = {0};
+                            strncpy(timed.header.frame_id, "can", sizeof(timed.header.frame_id) - 1);
+                            timed.id = frame.id;
+                            timed.is_extended = frame.is_extended;
+                            timed.is_error = false;
+                            timed.dlc = frame.dlc > 8U ? 8U : frame.dlc;
+                            memcpy(timed.data, frame.data, timed.dlc);
+                            timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
+                            timed.timestamp_valid = false;
+                            if (can_transport_msgs_TimedFrame_serialize(&ub, &timed)) {
+                                zenoh_ros2_pub_send(&g_timed_classic_pub, cdr_buf, ucdr_buffer_length(&ub));
+                            }
+                        }
                         g_bridge.can_to_zenoh_count++;
                     }
                 }
@@ -578,6 +609,12 @@ static void zenoh_engine_task(void *arg) {
         printf("[ROS2] Node init failed!\r\n");
         return;
     }
+    zenoh_ros2_pub_create(&g_timed_classic_pub, &g_bridge.node, "can/timed_frames",
+                          can_transport_msgs_TimedFrame_DDS_TYPE,
+                          can_transport_msgs_TimedFrame_TYPE_HASH);
+    zenoh_ros2_pub_create(&g_timed_fd_pub, &g_bridge.node, "canfd/timed_frames",
+                          can_transport_msgs_TimedFDFrame_DDS_TYPE,
+                          can_transport_msgs_TimedFDFrame_TYPE_HASH);
 
     /* Auto-register topics from declarative master table */
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());

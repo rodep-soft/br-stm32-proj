@@ -37,6 +37,7 @@ typedef struct {
     bool     is_extended;
     bool     is_rtr;
     uint8_t  data[8];
+    uint32_t rx_tick;
 } can_frame_t;
 
 static CAN_HandleTypeDef hcan1;
@@ -73,6 +74,7 @@ typedef struct {
 } bridge_t;
 
 static bridge_t g_bridge;
+static zenoh_ros2_pub_t g_timed_pub;
 
 /* ───────────────────── CAN Hardware & Filter Setup ─────────────────── */
 
@@ -278,6 +280,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
             }
             frame.is_rtr = (rx_hdr.RTR == CAN_RTR_REMOTE);
             frame.dlc = (uint8_t)rx_hdr.DLC;
+            frame.rx_tick = HAL_GetTick();
 
             BaseType_t xHigherPriorityTaskWoken = pdFALSE;
             if (xQueueSendFromISR(g_rx_queue, &frame, &xHigherPriorityTaskWoken) == pdTRUE) {
@@ -448,6 +451,19 @@ static void bridge_worker_task(void const *arg) {
                     ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                     if (can_msgs_Frame_serialize(&ub, &out_frame)) {
                         zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
+                        can_transport_msgs_TimedFrame timed = {0};
+                        strncpy(timed.header.frame_id, "can", sizeof(timed.header.frame_id) - 1);
+                        timed.id = frame.id;
+                        timed.is_rtr = frame.is_rtr;
+                        timed.is_extended = frame.is_extended;
+                        timed.dlc = frame.dlc;
+                        memcpy(timed.data, frame.data, timed.dlc);
+                        timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
+                        timed.timestamp_valid = false;
+                        ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
+                        if (can_transport_msgs_TimedFrame_serialize(&ub, &timed)) {
+                            zenoh_ros2_pub_send(&g_timed_pub, cdr_buf, ucdr_buffer_length(&ub));
+                        }
                         g_bridge.can_to_zenoh_count++;
                         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
                     }
@@ -559,6 +575,9 @@ static void zenoh_engine_task(void const *arg) {
         printf("[ROS2] Node init failed!\r\n");
         return;
     }
+    zenoh_ros2_pub_create(&g_timed_pub, &g_bridge.node, "can/timed_frames",
+                          can_transport_msgs_TimedFrame_DDS_TYPE,
+                          can_transport_msgs_TimedFrame_TYPE_HASH);
 
     /* Auto-register topics from declarative master table */
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());

@@ -45,6 +45,10 @@ if(TRANSPORT_MSG_FILES)
             --package can_msgs --msg ${TRANSPORT_MSG_DIR}/Frame.msg --out-dir ${TRANSPORT_GEN_DIR}
         COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
             --package can_transport_msgs --msg ${TRANSPORT_MSG_DIR}/FDFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package can_transport_msgs --msg ${TRANSPORT_MSG_DIR}/TimedFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package can_transport_msgs --msg ${TRANSPORT_MSG_DIR}/TimedFDFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
         COMMAND ${CMAKE_COMMAND} -E touch ${TRANSPORT_GEN_DIR}/generated.stamp
         DEPENDS ${TRANSPORT_MSG_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
         COMMENT "Generating CAN transport Micro-CDR headers"
