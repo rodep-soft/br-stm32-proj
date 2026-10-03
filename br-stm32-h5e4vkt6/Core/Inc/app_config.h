@@ -69,6 +69,8 @@ extern "C" {
 #define CONFIG_CAN2_DATA_BITRATE      2000000U
 #define CONFIG_CAN2_USE_FD            1
 #define CONFIG_CAN_BITRATE            CONFIG_CAN1_BITRATE
+#define CONFIG_CAN_CLASSIC_BUS        BRIDGE_FDCAN1
+#define CONFIG_CAN_FD_BUS             BRIDGE_FDCAN2
 #define CONFIG_CAN_STATS_PERIOD_MS    500      /**< Diagnostics reporting interval */
 #define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
 #define CONFIG_CAN_FRAME_TIMEOUT_MS   100      /**< Incomplete multi-frame drop timeout */
@@ -108,6 +110,7 @@ typedef enum {
 } bridge_dir_t;
 
 typedef enum {
+    BRIDGE_CAN_ANY = 0,
     BRIDGE_FDCAN1 = 1,
     BRIDGE_FDCAN2 = 2
 } bridge_can_bus_t;
@@ -234,12 +237,12 @@ static const bridge_topic_t g_bridge_topics[] = {
                       BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
 
     /* 5. Generic classic CAN transport for sensor gateways */
-    BRIDGE_ROS_TO_CAN_FRAME("can/tx", BRIDGE_FDCAN1),
-    BRIDGE_CAN_TO_ROS_FRAME("can/rx", BRIDGE_FDCAN1),
+    BRIDGE_ROS_TO_CAN_FRAME("can/tx", CONFIG_CAN_CLASSIC_BUS),
+    BRIDGE_CAN_TO_ROS_FRAME("can/rx", BRIDGE_CAN_ANY),
 
     /* 6. Robstride CAN-FD transport */
-    BRIDGE_ROS_TO_CAN_FD_FRAME("robstride/can_tx", BRIDGE_FDCAN2),
-    BRIDGE_CAN_TO_ROS_FD_FRAME("robstride/can_rx", BRIDGE_FDCAN2),
+    BRIDGE_ROS_TO_CAN_FD_FRAME("robstride/can_tx", CONFIG_CAN_FD_BUS),
+    BRIDGE_CAN_TO_ROS_FD_FRAME("robstride/can_rx", BRIDGE_CAN_ANY),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))

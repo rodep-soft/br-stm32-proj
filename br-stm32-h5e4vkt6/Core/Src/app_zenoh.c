@@ -76,7 +76,9 @@ static uint32_t can_fd_dlc_code(uint8_t length)
 static bool can_frame_matches_route(const can_frame_t *frame, const bridge_topic_t *topic)
 {
     const bool route_is_fd = topic->frame_mode == BRIDGE_FRAME_FD;
-    return frame->bus == topic->bus && frame->is_fd == route_is_fd;
+    const bool route_matches_bus =
+        topic->bus == BRIDGE_CAN_ANY || frame->bus == topic->bus;
+    return route_matches_bus && frame->is_fd == route_is_fd;
 }
 
 extern FDCAN_HandleTypeDef hfdcan1;
