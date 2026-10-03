@@ -18,10 +18,6 @@
 #include <ucdr/microcdr.h>
 
 /* Generated message headers */
-#include "generated/MotorStatus.h"
-#include "generated/ImuData.h"
-#include "generated/MotorCommand.h"
-#include "generated/Ping.h"
 #include "generated/transport/Frame.h"
 #include "generated/transport/FDFrame.h"
 
@@ -160,28 +156,6 @@ typedef struct {
         .print_fn       = printer, \
     }
 
-#define BRIDGE_CAN_TO_ROS(topic, msg, can_id, can_bus, mode) \
-    BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_TO_ROS, can_bus, mode, can_id, \
-                      BRIDGE_PAYLOAD_TYPED, \
-                      sizeof(robot_msgs_##msg), robot_msgs_##msg, \
-                      (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, NULL, \
-                      (msg_print_fn_t)robot_msgs_##msg##_print)
-
-#define BRIDGE_ROS_TO_CAN(topic, msg, can_id, can_bus, mode) \
-    BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN, can_bus, mode, can_id, \
-                      BRIDGE_PAYLOAD_TYPED, \
-                      sizeof(robot_msgs_##msg), robot_msgs_##msg, NULL, \
-                      (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
-                      (msg_print_fn_t)robot_msgs_##msg##_print)
-
-#define BRIDGE_CAN_RECV(topic, msg, rx_id, can_bus, mode) \
-    BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_RECV, can_bus, mode, rx_id, \
-                      BRIDGE_PAYLOAD_TYPED, \
-                      sizeof(robot_msgs_##msg), robot_msgs_##msg, \
-                      (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
-                      (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
-                      (msg_print_fn_t)robot_msgs_##msg##_print)
-
 #define BRIDGE_ROS_TO_CAN_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN_RAW, can_bus, BRIDGE_FRAME_CLASSIC, 0, \
                       BRIDGE_PAYLOAD_CLASSIC_FRAME, \
@@ -217,30 +191,11 @@ typedef struct {
 // ここにデータ送受信を定義
 // can <--> ros2の方向に注意
 static const bridge_topic_t g_bridge_topics[] = {
-    /* 1. CAN -> ROS 2: MotorStatus (28B = 4 CAN frames: 0x100..0x103) */
-    BRIDGE_CAN_TO_ROS("motor_status", MotorStatus, 0x100,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 2. CAN -> ROS 2: ImuData (24B = 3 CAN frames: 0x200..0x202) */
-    BRIDGE_CAN_TO_ROS("imu_data", ImuData, 0x200,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
-    BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 4. Standalone CAN Receiver: Ping (rx: 0x400) */
-    BRIDGE_CAN_RECV("ping_echo", Ping, 0x400,
-                    BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-    // 成功！
-    BRIDGE_CAN_TO_ROS("kokura_speak", Ping, 0x400,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 5. Generic classic CAN transport for sensor gateways */
+    /* Generic classic CAN transport */
     BRIDGE_ROS_TO_CAN_FRAME("can/tx", CONFIG_CAN_CLASSIC_BUS),
     BRIDGE_CAN_TO_ROS_FRAME("can/rx", BRIDGE_CAN_ANY),
 
-    /* 6. Generic CAN-FD transport */
+    /* Generic CAN-FD transport */
     BRIDGE_ROS_TO_CAN_FD_FRAME("canfd/tx", CONFIG_CAN_FD_BUS),
     BRIDGE_CAN_TO_ROS_FD_FRAME("canfd/rx", BRIDGE_CAN_ANY),
 };
