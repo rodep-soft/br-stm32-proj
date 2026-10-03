@@ -240,9 +240,9 @@ static const bridge_topic_t g_bridge_topics[] = {
     BRIDGE_ROS_TO_CAN_FRAME("can/tx", CONFIG_CAN_CLASSIC_BUS),
     BRIDGE_CAN_TO_ROS_FRAME("can/rx", BRIDGE_CAN_ANY),
 
-    /* 6. Robstride CAN-FD transport */
-    BRIDGE_ROS_TO_CAN_FD_FRAME("robstride/can_tx", CONFIG_CAN_FD_BUS),
-    BRIDGE_CAN_TO_ROS_FD_FRAME("robstride/can_rx", BRIDGE_CAN_ANY),
+    /* 6. Generic CAN-FD transport */
+    BRIDGE_ROS_TO_CAN_FD_FRAME("canfd/tx", CONFIG_CAN_FD_BUS),
+    BRIDGE_CAN_TO_ROS_FD_FRAME("canfd/rx", BRIDGE_CAN_ANY),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))
