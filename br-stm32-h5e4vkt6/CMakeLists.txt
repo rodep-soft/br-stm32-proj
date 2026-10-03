@@ -64,6 +64,13 @@ if(TRANSPORT_MSG_FILES)
     add_dependencies(${CMAKE_PROJECT_NAME} generate_transport_messages)
 endif()
 
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary
+            $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+            ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
+    COMMENT "Generating ${CMAKE_PROJECT_NAME}.bin"
+)
+
 # Use custom FindThreads module to prevent linking -lpthreads in bare-metal toolchains
 list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 set(CMAKE_THREAD_LIBS_INIT "")
