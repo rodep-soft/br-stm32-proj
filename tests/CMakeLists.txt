@@ -18,12 +18,14 @@ endif()
 
 # 1. Serialization test
 add_executable(test_serialization test_serialization.c)
-target_include_directories(test_serialization PRIVATE ${PROJECT_INC_DIR} ${PROJECT_INC_DIR}/generated)
+target_include_directories(test_serialization PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${PROJECT_INC_DIR} ${PROJECT_INC_DIR}/generated)
 target_link_libraries(test_serialization PRIVATE microcdr m)
 
 # 2. Comprehensive Bridge Engine test (Multi-frame, Packet Loss, HW Filters, Edge Cases)
 add_executable(test_bridge_engine test_bridge_engine.c app_config_test.c)
-target_include_directories(test_bridge_engine PRIVATE ${PROJECT_INC_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(test_bridge_engine PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/fixtures ${PROJECT_INC_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(test_bridge_engine PRIVATE microcdr m)
 
 enable_testing()
