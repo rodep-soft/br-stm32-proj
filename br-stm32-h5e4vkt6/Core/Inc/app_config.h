@@ -185,16 +185,16 @@ typedef struct {
 #define BRIDGE_ROS_TO_CAN_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN_RAW, can_bus, BRIDGE_FRAME_CLASSIC, 0, \
                       BRIDGE_PAYLOAD_CLASSIC_FRAME, \
-                      sizeof(can_transport_msgs_Frame), can_transport_msgs_Frame, NULL, \
-                      (cdr_deserialize_fn_t)can_transport_msgs_Frame_deserialize, \
-                      (msg_print_fn_t)can_transport_msgs_Frame_print)
+                      sizeof(can_msgs_Frame), can_msgs_Frame, NULL, \
+                      (cdr_deserialize_fn_t)can_msgs_Frame_deserialize, \
+                      (msg_print_fn_t)can_msgs_Frame_print)
 
 #define BRIDGE_CAN_TO_ROS_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_TO_ROS_RAW, can_bus, BRIDGE_FRAME_CLASSIC, 0, \
                       BRIDGE_PAYLOAD_CLASSIC_FRAME, \
-                      sizeof(can_transport_msgs_Frame), can_transport_msgs_Frame, \
-                      (cdr_serialize_fn_t)can_transport_msgs_Frame_serialize, NULL, \
-                      (msg_print_fn_t)can_transport_msgs_Frame_print)
+                      sizeof(can_msgs_Frame), can_msgs_Frame, \
+                      (cdr_serialize_fn_t)can_msgs_Frame_serialize, NULL, \
+                      (msg_print_fn_t)can_msgs_Frame_print)
 
 #define BRIDGE_ROS_TO_CAN_FD_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN_RAW, can_bus, BRIDGE_FRAME_FD, 0, \

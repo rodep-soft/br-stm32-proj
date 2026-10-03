@@ -355,7 +355,7 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
             is_extended = cf->is_extended;
             is_rtr = false;
         } else {
-            const can_transport_msgs_Frame *cf = (const can_transport_msgs_Frame *)msg_buffer;
+            const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
             id = cf->id;
             dlc = cf->dlc;
             data = cf->data;
@@ -433,7 +433,7 @@ static void bridge_worker_task(void *arg) {
                         memcpy(out_frame.data, frame.data, frame.dlc);
                         serialized = can_transport_msgs_FDFrame_serialize(&ub, &out_frame);
                     } else {
-                        can_transport_msgs_Frame out_frame;
+                        can_msgs_Frame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
                         strncpy(out_frame.header.frame_id, "can", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
@@ -441,7 +441,7 @@ static void bridge_worker_task(void *arg) {
                         out_frame.is_rtr = frame.is_rtr;
                         out_frame.dlc = frame.dlc > 8U ? 8U : frame.dlc;
                         memcpy(out_frame.data, frame.data, out_frame.dlc);
-                        serialized = can_transport_msgs_Frame_serialize(&ub, &out_frame);
+                        serialized = can_msgs_Frame_serialize(&ub, &out_frame);
                     }
                     if (serialized) {
                         zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));

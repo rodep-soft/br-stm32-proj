@@ -161,12 +161,12 @@ typedef struct {
         .topic_name     = topic, \
         .dir            = BRIDGE_DIR_ROS_TO_CAN_RAW, \
         .can_base_id    = 0, \
-        .msg_size       = sizeof(can_transport_msgs_Frame), \
-        .dds_type       = can_transport_msgs_Frame_DDS_TYPE, \
-        .type_hash      = can_transport_msgs_Frame_TYPE_HASH, \
+        .msg_size       = sizeof(can_msgs_Frame), \
+        .dds_type       = can_msgs_Frame_DDS_TYPE, \
+        .type_hash      = can_msgs_Frame_TYPE_HASH, \
         .serialize_fn   = NULL, \
-        .deserialize_fn = (cdr_deserialize_fn_t)can_transport_msgs_Frame_deserialize, \
-        .print_fn       = (msg_print_fn_t)can_transport_msgs_Frame_print, \
+        .deserialize_fn = (cdr_deserialize_fn_t)can_msgs_Frame_deserialize, \
+        .print_fn       = (msg_print_fn_t)can_msgs_Frame_print, \
     }
 
 #define BRIDGE_CAN_TO_ROS_FRAME(topic) \
@@ -174,12 +174,12 @@ typedef struct {
         .topic_name     = topic, \
         .dir            = BRIDGE_DIR_CAN_TO_ROS_RAW, \
         .can_base_id    = 0, \
-        .msg_size       = sizeof(can_transport_msgs_Frame), \
-        .dds_type       = can_transport_msgs_Frame_DDS_TYPE, \
-        .type_hash      = can_transport_msgs_Frame_TYPE_HASH, \
-        .serialize_fn   = (cdr_serialize_fn_t)can_transport_msgs_Frame_serialize, \
+        .msg_size       = sizeof(can_msgs_Frame), \
+        .dds_type       = can_msgs_Frame_DDS_TYPE, \
+        .type_hash      = can_msgs_Frame_TYPE_HASH, \
+        .serialize_fn   = (cdr_serialize_fn_t)can_msgs_Frame_serialize, \
         .deserialize_fn = NULL, \
-        .print_fn       = (msg_print_fn_t)can_transport_msgs_Frame_print, \
+        .print_fn       = (msg_print_fn_t)can_msgs_Frame_print, \
     }
 
 /**

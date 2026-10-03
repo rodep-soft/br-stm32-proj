@@ -1,5 +1,5 @@
 # Frame.msg
-# package: can_transport_msgs
+# package: can_msgs
 std_msgs/Header header
 uint32 id
 bool is_rtr
