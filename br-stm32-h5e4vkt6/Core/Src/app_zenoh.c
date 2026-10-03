@@ -182,6 +182,10 @@ static void can_hardware_init(void) {
 /* Direct thread-safe CAN transmission supporting Standard (11-bit) and Extended (29-bit) IDs */
 static bool can_send_frame_ex(bridge_can_bus_t bus, uint8_t frame_mode, uint32_t id,
                               const uint8_t *data, uint8_t dlc, bool is_extended, bool is_rtr) {
+    if (!netif_is_link_up(&gnetif)) {
+        g_bridge.drop_count++;
+        return false;
+    }
     if (data == NULL) {
         g_bridge.drop_count++;
         return false;
@@ -556,10 +560,6 @@ static void zenoh_engine_task(void *arg) {
     printf("  STM32H5 Ultra-Thin Zenoh-CAN Bridge             \r\n");
     printf("==================================================\r\n");
 
-    while (!wait_for_network()) {
-        osDelay(1000);
-    }
-
     /* Open Zenoh session */
     z_owned_config_t config;
     configure_zenoh_session(&config);
@@ -665,8 +665,16 @@ static void network_start_task(void *arg) {
     (void)arg;
     MX_LWIP_Init();
 
+    while (!wait_for_network()) {
+        printf("[ETH-ERROR] Ethernet link unavailable; retrying indefinitely.\r\n");
+        osDelay(1000);
+    }
+    can_hardware_init();
+
     xTaskCreate(zenoh_engine_task, "zenoh", CONFIG_STACK_ZENOH_TASK,
                 NULL, tskIDLE_PRIORITY + 2, NULL);
+    xTaskCreate(bridge_worker_task, "can_bridge", CONFIG_STACK_BRIDGE_TASK,
+                NULL, tskIDLE_PRIORITY + 3, NULL);
     vTaskDelete(NULL);
 }
 
@@ -674,14 +682,7 @@ void app_zenoh_start(void) {
     memset(&g_bridge, 0, sizeof(g_bridge));
     memset(g_runtimes, 0, sizeof(g_runtimes));
 
-    /* Initialize CAN hardware & queues BEFORE creating tasks to prevent NULL queue asserts */
-    can_hardware_init();
-
-    /* Ethernet/LwIP starts in its own task; CAN never waits for Ethernet. */
+    /* Ethernet is a hard prerequisite; CAN remains disabled without link. */
     xTaskCreate(network_start_task, "net_init", 512,
                 NULL, tskIDLE_PRIORITY + 1, NULL);
-
-    /* CAN->Zenoh worker remains independent of Ethernet and Zenoh state. */
-    xTaskCreate(bridge_worker_task, "can_bridge", CONFIG_STACK_BRIDGE_TASK,
-                NULL, tskIDLE_PRIORITY + 3, NULL);
 }

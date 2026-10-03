@@ -199,6 +199,10 @@ static void can_hardware_init(void) {
 
 /* Direct thread-safe CAN transmission supporting Standard (11-bit) and Extended (29-bit) IDs */
 static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, bool is_extended, bool is_rtr) {
+    if (!netif_is_link_up(&gnetif)) {
+        g_bridge.drop_count++;
+        return false;
+    }
     if (data == NULL) {
         g_bridge.drop_count++;
         return false;
@@ -537,10 +541,6 @@ static void zenoh_engine_task(void const *arg) {
     printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
     printf("==================================================\r\n");
 
-    while (!wait_for_network()) {
-        osDelay(1000);
-    }
-
     /* Open Zenoh session */
     z_owned_config_t config;
     configure_zenoh_session(&config);
@@ -651,18 +651,32 @@ static void zenoh_engine_task(void const *arg) {
 
 /* ───────────────────── Public Starter ──────────────────────────────── */
 
+static void network_start_task(void const *arg) {
+    (void)arg;
+    bool error_led = false;
+    while (!wait_for_network()) {
+        error_led = !error_led;
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin,
+                          error_led ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        printf("[ETH-ERROR] Ethernet link unavailable; retrying indefinitely.\r\n");
+        osDelay(1000);
+    }
+    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+
+    can_hardware_init();
+
+    osThreadDef(zenohTask, zenoh_engine_task, osPriorityNormal, 0, CONFIG_STACK_ZENOH_TASK);
+    osThreadCreate(osThread(zenohTask), NULL);
+    osThreadDef(bridgeTask, bridge_worker_task, osPriorityAboveNormal, 0, CONFIG_STACK_BRIDGE_TASK);
+    osThreadCreate(osThread(bridgeTask), NULL);
+    vTaskDelete(NULL);
+}
+
 void app_zenoh_start(void) {
     memset(&g_bridge, 0, sizeof(g_bridge));
     memset(g_runtimes, 0, sizeof(g_runtimes));
 
-    /* Initialize CAN hardware & queues BEFORE creating tasks to prevent NULL queue asserts */
-    can_hardware_init();
-
-    /* 1. Zenoh Manager + Diagnostics Loop (Single task) */
-    osThreadDef(zenohTask, zenoh_engine_task, osPriorityNormal, 0, CONFIG_STACK_ZENOH_TASK);
-    osThreadCreate(osThread(zenohTask), NULL);
-
-    /* 2. CAN->Zenoh High-Priority Reassembly Worker */
-    osThreadDef(bridgeTask, bridge_worker_task, osPriorityAboveNormal, 0, CONFIG_STACK_BRIDGE_TASK);
-    osThreadCreate(osThread(bridgeTask), NULL);
+    /* Ethernet is a hard prerequisite: do not enable CAN bridge without link. */
+    osThreadDef(networkTask, network_start_task, osPriorityNormal, 0, 512);
+    osThreadCreate(osThread(networkTask), NULL);
 }
