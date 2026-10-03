@@ -379,10 +379,12 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
     /* Raw CAN Frame -> Direct CAN TX */
     if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
         const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
+        /*
         printf("[RAW-TX] id=0x%08lX ext=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
                (unsigned long)cf->id, cf->is_extended, cf->dlc,
                cf->data[0], cf->data[1], cf->data[2], cf->data[3],
                cf->data[4], cf->data[5], cf->data[6], cf->data[7]);
+        */
         can_send_frame_ex(cf->id, cf->data, cf->dlc, cf->is_extended, cf->is_rtr);
         g_bridge.zenoh_to_can_count++;
         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
@@ -423,12 +425,14 @@ static void bridge_worker_task(void const *arg) {
 
         uint32_t now = HAL_GetTick();
 
+        /* Commented out to prevent 115200-baud UART blocking from starving LwIP and FreeRTOS tasks
         if (frame.id != 0x400) {
             printf("[RAW-RX] id=0x%08lX ext=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
                    (unsigned long)frame.id, frame.is_extended, frame.dlc,
                    frame.data[0], frame.data[1], frame.data[2], frame.data[3],
                    frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
         }
+        */
 
         /* 1. Raw Transparent CAN Frame Forwarding -> ROS 2 (/from_can_bus) */
         if (g_bridge.zenoh_ready) {

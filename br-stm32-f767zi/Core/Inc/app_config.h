@@ -61,7 +61,7 @@ extern "C" {
  * ============================================================================== */
  
 // baudrateは合わせる
-#define CONFIG_CAN_BITRATE            1000000U  /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
+#define CONFIG_CAN_BITRATE            500000U   /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
 #define CONFIG_CAN_STATS_PERIOD_MS    3000     /**< Diagnostics reporting interval */
 #define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
 #define CONFIG_CAN_FRAME_TIMEOUT_MS   100      /**< Incomplete multi-frame drop timeout */
