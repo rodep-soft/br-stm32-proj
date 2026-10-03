@@ -1,5 +1,5 @@
 # ==============================================================================
-# Makefile for STM32 F7/H5 Zenoh-Pico Project (Nix & Native Compatible)
+# Makefile for STM32 F7/H5/G4 Projects (Nix & Native Compatible)
 # ==============================================================================
 
 TARGET       ?= h5
@@ -9,6 +9,13 @@ ifeq ($(TARGET),f7)
   PROJECT_DIR  := br-stm32-f767zi
   TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
   OPENOCD_TARGET := stm32f7x.cfg
+  ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
+  BIN_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).bin
+else ifeq ($(TARGET),g431)
+  PROJECT_NAME := stm32-g431KBTx_encoder_BNO085
+  PROJECT_DIR  := stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085
+  TOOLCHAIN    := $(CURDIR)/$(PROJECT_DIR)/cmake/gcc-arm-none-eabi.cmake
+  OPENOCD_TARGET := stm32g4x.cfg
   ELF_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).elf
   BIN_FILE     := $(PROJECT_DIR)/build/$(PROJECT_NAME).bin
 else
@@ -335,3 +342,4 @@ help:
 	@echo "Target selection:"
 	@echo "  make TARGET=h5 build  - Build for STM32H5 (default)"
 	@echo "  make TARGET=f7 build  - Build for STM32F7"
+	@echo "  make TARGET=g431 build - Build for STM32G431 encoder/BNO085"
