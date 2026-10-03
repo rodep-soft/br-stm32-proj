@@ -18,12 +18,8 @@
 #include <ucdr/microcdr.h>
 
 /* Generated message headers */
-#include "generated/MotorStatus.h"
-#include "generated/ImuData.h"
-#include "generated/MotorCommand.h"
-#include "generated/Ping.h"
-#include "generated/Frame.h"
-#include "generated/FDFrame.h"
+#include "generated/transport/Frame.h"
+#include "generated/transport/FDFrame.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,14 +29,15 @@ extern "C" {
  * 1. Network (Ethernet) Settings
  * ============================================================================== */
 // DHCPはなるべく使わないこと
-#define CONFIG_NET_USE_DHCP           0  /**< 0: Instant static IP (< 1s boot), 1: DHCP fallback */
+#define CONFIG_NET_USE_DHCP           0  /**< 0: static-first, 1: DHCP-first with static fallback */
 // stm32の静的(static)IP
-#define CONFIG_NET_STATIC_IP          "192.168.50.77"
+#define CONFIG_NET_STATIC_IP          "192.168.50.78"
 #define CONFIG_NET_STATIC_NETMASK     "255.255.255.0"
 
 // これは部室用
 #define CONFIG_NET_STATIC_GATEWAY     "192.168.50.1"
 #define CONFIG_NET_DHCP_TIMEOUT_SEC   5
+#define CONFIG_NET_LINK_TIMEOUT_SEC   10
 
 /* ==============================================================================
  * 2. Zenoh & ROS 2 Settings
@@ -69,6 +66,8 @@ extern "C" {
 #define CONFIG_CAN2_DATA_BITRATE      2000000U
 #define CONFIG_CAN2_USE_FD            1
 #define CONFIG_CAN_BITRATE            CONFIG_CAN1_BITRATE
+#define CONFIG_CAN_CLASSIC_BUS        BRIDGE_FDCAN1
+#define CONFIG_CAN_FD_BUS             BRIDGE_FDCAN2
 #define CONFIG_CAN_STATS_PERIOD_MS    500      /**< Diagnostics reporting interval */
 #define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
 #define CONFIG_CAN_FRAME_TIMEOUT_MS   100      /**< Incomplete multi-frame drop timeout */
@@ -103,11 +102,12 @@ typedef enum {
     BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
     BRIDGE_DIR_CAN_RECV,        /**< Standalone CAN Receiver: log to serial without PC/Zenoh */
     BRIDGE_DIR_CAN_ECHO = BRIDGE_DIR_CAN_RECV, /**< Alias for backward compatibility */
-    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< can_msgs/Frame (Subscribe) -> Direct CAN frame TX */
-    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> can_msgs/Frame (Publish) */
+    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< can_transport_msgs/Frame -> Direct CAN frame TX */
+    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> can_transport_msgs/Frame */
 } bridge_dir_t;
 
 typedef enum {
+    BRIDGE_CAN_ANY = 0,
     BRIDGE_FDCAN1 = 1,
     BRIDGE_FDCAN2 = 2
 } bridge_can_bus_t;
@@ -157,28 +157,6 @@ typedef struct {
         .print_fn       = printer, \
     }
 
-#define BRIDGE_CAN_TO_ROS(topic, msg, can_id, can_bus, mode) \
-    BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_TO_ROS, can_bus, mode, can_id, \
-                      BRIDGE_PAYLOAD_TYPED, \
-                      sizeof(robot_msgs_##msg), robot_msgs_##msg, \
-                      (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, NULL, \
-                      (msg_print_fn_t)robot_msgs_##msg##_print)
-
-#define BRIDGE_ROS_TO_CAN(topic, msg, can_id, can_bus, mode) \
-    BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN, can_bus, mode, can_id, \
-                      BRIDGE_PAYLOAD_TYPED, \
-                      sizeof(robot_msgs_##msg), robot_msgs_##msg, NULL, \
-                      (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
-                      (msg_print_fn_t)robot_msgs_##msg##_print)
-
-#define BRIDGE_CAN_RECV(topic, msg, rx_id, can_bus, mode) \
-    BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_RECV, can_bus, mode, rx_id, \
-                      BRIDGE_PAYLOAD_TYPED, \
-                      sizeof(robot_msgs_##msg), robot_msgs_##msg, \
-                      (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
-                      (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
-                      (msg_print_fn_t)robot_msgs_##msg##_print)
-
 #define BRIDGE_ROS_TO_CAN_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN_RAW, can_bus, BRIDGE_FRAME_CLASSIC, 0, \
                       BRIDGE_PAYLOAD_CLASSIC_FRAME, \
@@ -196,16 +174,16 @@ typedef struct {
 #define BRIDGE_ROS_TO_CAN_FD_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN_RAW, can_bus, BRIDGE_FRAME_FD, 0, \
                       BRIDGE_PAYLOAD_FD_FRAME, \
-                      sizeof(can_msgs_FDFrame), can_msgs_FDFrame, NULL, \
-                      (cdr_deserialize_fn_t)can_msgs_FDFrame_deserialize, \
-                      (msg_print_fn_t)can_msgs_FDFrame_print)
+                      sizeof(can_transport_msgs_FDFrame), can_transport_msgs_FDFrame, NULL, \
+                      (cdr_deserialize_fn_t)can_transport_msgs_FDFrame_deserialize, \
+                      (msg_print_fn_t)can_transport_msgs_FDFrame_print)
 
 #define BRIDGE_CAN_TO_ROS_FD_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_TO_ROS_RAW, can_bus, BRIDGE_FRAME_FD, 0, \
                       BRIDGE_PAYLOAD_FD_FRAME, \
-                      sizeof(can_msgs_FDFrame), can_msgs_FDFrame, \
-                      (cdr_serialize_fn_t)can_msgs_FDFrame_serialize, NULL, \
-                      (msg_print_fn_t)can_msgs_FDFrame_print)
+                      sizeof(can_transport_msgs_FDFrame), can_transport_msgs_FDFrame, \
+                      (cdr_serialize_fn_t)can_transport_msgs_FDFrame_serialize, NULL, \
+                      (msg_print_fn_t)can_transport_msgs_FDFrame_print)
 
 /**
  * MASTER TOPIC TABLE: Add your sensors, actuators, and ping-pong devices here.
@@ -214,30 +192,13 @@ typedef struct {
 // ここにデータ送受信を定義
 // can <--> ros2の方向に注意
 static const bridge_topic_t g_bridge_topics[] = {
-    /* 1. CAN -> ROS 2: MotorStatus (28B = 4 CAN frames: 0x100..0x103) */
-    BRIDGE_CAN_TO_ROS("motor_status", MotorStatus, 0x100,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
+    /* Generic classic CAN transport */
+    BRIDGE_ROS_TO_CAN_FRAME("can/tx", CONFIG_CAN_CLASSIC_BUS),
+    BRIDGE_CAN_TO_ROS_FRAME("can/rx", BRIDGE_CAN_ANY),
 
-    /* 2. CAN -> ROS 2: ImuData (24B = 3 CAN frames: 0x200..0x202) */
-    BRIDGE_CAN_TO_ROS("imu_data", ImuData, 0x200,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
-    BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 4. Standalone CAN Receiver: Ping (rx: 0x400) */
-    BRIDGE_CAN_RECV("ping_echo", Ping, 0x400,
-                    BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-    // 成功！
-    BRIDGE_CAN_TO_ROS("kokura_speak", Ping, 0x400,
-                      BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
-
-    /* 5. Robstride CAN Bridge: ROS 2 -> CAN (robstride/can_tx) */
-    BRIDGE_ROS_TO_CAN_FD_FRAME("robstride/can_tx", BRIDGE_FDCAN2),
-
-    /* 6. Robstride CAN Bridge: CAN -> ROS 2 (robstride/can_rx) */
-    BRIDGE_CAN_TO_ROS_FD_FRAME("robstride/can_rx", BRIDGE_FDCAN2),
+    /* Generic CAN-FD transport */
+    BRIDGE_ROS_TO_CAN_FD_FRAME("canfd/tx", CONFIG_CAN_FD_BUS),
+    BRIDGE_CAN_TO_ROS_FD_FRAME("canfd/rx", BRIDGE_CAN_ANY),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))

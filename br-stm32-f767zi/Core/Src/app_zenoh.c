@@ -199,6 +199,10 @@ static void can_hardware_init(void) {
 
 /* Direct thread-safe CAN transmission supporting Standard (11-bit) and Extended (29-bit) IDs */
 static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, bool is_extended, bool is_rtr) {
+    if (!netif_is_link_up(&gnetif)) {
+        g_bridge.drop_count++;
+        return false;
+    }
     if (data == NULL) {
         g_bridge.drop_count++;
         return false;
@@ -291,7 +295,17 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 static const char *const g_zenoh_locators[] = { CONFIG_ZENOH_LOCATOR_LIST };
 #define ZENOH_LOCATOR_COUNT (sizeof(g_zenoh_locators) / sizeof(g_zenoh_locators[0]))
 
-static void wait_for_network(void) {
+static void configure_zenoh_session(z_owned_config_t *config) {
+    z_config_default(config);
+    zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
+        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
+            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
+        }
+    }
+}
+
+static bool wait_for_network(void) {
 #if (CONFIG_NET_USE_DHCP == 0)
     /* Instant static IP mode (< 1s boot) */
     printf("[ETH] Instant Static IP: %s\r\n", CONFIG_NET_STATIC_IP);
@@ -303,16 +317,22 @@ static void wait_for_network(void) {
     netif_set_up(&gnetif);
 
     uint32_t wait_count = 0;
-    while (!netif_is_link_up(&gnetif)) {
+    const uint32_t timeout_ticks = CONFIG_NET_LINK_TIMEOUT_SEC * 10U;
+    while (!netif_is_link_up(&gnetif) && wait_count < timeout_ticks) {
         if (wait_count++ % 30 == 0) {
             printf("[ETH] Waiting for Ethernet cable link (plug in cable to connect Zenoh)...\r\n");
         }
         osDelay(100);
     }
+    if (!netif_is_link_up(&gnetif)) {
+        printf("[ETH] Link timeout; CAN remains active, retrying Ethernet later.\r\n");
+        return false;
+    }
 #else
     printf("[ETH] Waiting for DHCP lease...\r\n");
     int sec = 0;
-    while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
+    while ((netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) &&
+           sec < CONFIG_NET_DHCP_TIMEOUT_SEC) {
         osDelay(1000);
         if (netif_is_link_up(&gnetif) && netif_dhcp_data(&gnetif) == NULL) {
             dhcp_start(&gnetif);
@@ -329,8 +349,12 @@ static void wait_for_network(void) {
             break;
         }
     }
+    if (gnetif.ip_addr.addr == 0) {
+        return false;
+    }
 #endif
     printf("[ETH] Link UP! IP: %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
+    return true;
 }
 
 /* ─────────── ROS 2 -> CAN: Direct Zero-Latency Callback ────────────── */
@@ -412,8 +436,6 @@ static void bridge_worker_task(void const *arg) {
 
                     can_msgs_Frame out_frame;
                     memset(&out_frame, 0, sizeof(out_frame));
-                    out_frame.header.sec = (int32_t)(now / 1000);
-                    out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
                     strncpy(out_frame.header.frame_id, "can1", sizeof(out_frame.header.frame_id) - 1);
                     out_frame.id = frame.id;
                     out_frame.is_extended = frame.is_extended;
@@ -519,24 +541,15 @@ static void zenoh_engine_task(void const *arg) {
     printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
     printf("==================================================\r\n");
 
-    wait_for_network();
-
     /* Open Zenoh session */
     z_owned_config_t config;
-    z_config_default(&config);
-    zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
-    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
-        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
-            zp_config_insert(z_loan_mut(config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
-        }
-    }
+    configure_zenoh_session(&config);
 
     z_result_t res;
     while ((res = z_open(&g_bridge.session, z_move(config), NULL)) < 0) {
         printf("[Zenoh] Connect failed (%d). Retry in 2s...\r\n", (int)res);
         osDelay(2000);
-        z_config_default(&config);
-        zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+        configure_zenoh_session(&config);
     }
     printf("[Zenoh] Connected to router!\r\n");
 
@@ -638,18 +651,32 @@ static void zenoh_engine_task(void const *arg) {
 
 /* ───────────────────── Public Starter ──────────────────────────────── */
 
+static void network_start_task(void const *arg) {
+    (void)arg;
+    bool error_led = false;
+    while (!wait_for_network()) {
+        error_led = !error_led;
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin,
+                          error_led ? GPIO_PIN_SET : GPIO_PIN_RESET);
+        printf("[ETH-ERROR] Ethernet link unavailable; retrying indefinitely.\r\n");
+        osDelay(1000);
+    }
+    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+
+    can_hardware_init();
+
+    osThreadDef(zenohTask, zenoh_engine_task, osPriorityNormal, 0, CONFIG_STACK_ZENOH_TASK);
+    osThreadCreate(osThread(zenohTask), NULL);
+    osThreadDef(bridgeTask, bridge_worker_task, osPriorityAboveNormal, 0, CONFIG_STACK_BRIDGE_TASK);
+    osThreadCreate(osThread(bridgeTask), NULL);
+    vTaskDelete(NULL);
+}
+
 void app_zenoh_start(void) {
     memset(&g_bridge, 0, sizeof(g_bridge));
     memset(g_runtimes, 0, sizeof(g_runtimes));
 
-    /* Initialize CAN hardware & queues BEFORE creating tasks to prevent NULL queue asserts */
-    can_hardware_init();
-
-    /* 1. Zenoh Manager + Diagnostics Loop (Single task) */
-    osThreadDef(zenohTask, zenoh_engine_task, osPriorityNormal, 0, CONFIG_STACK_ZENOH_TASK);
-    osThreadCreate(osThread(zenohTask), NULL);
-
-    /* 2. CAN->Zenoh High-Priority Reassembly Worker */
-    osThreadDef(bridgeTask, bridge_worker_task, osPriorityAboveNormal, 0, CONFIG_STACK_BRIDGE_TASK);
-    osThreadCreate(osThread(bridgeTask), NULL);
+    /* Ethernet is a hard prerequisite: do not enable CAN bridge without link. */
+    osThreadDef(networkTask, network_start_task, osPriorityNormal, 0, 512);
+    osThreadCreate(osThread(networkTask), NULL);
 }

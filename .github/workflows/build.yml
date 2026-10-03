@@ -36,12 +36,14 @@ jobs:
 
       - name: Generate ROS 2 message headers
         run: |
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg \
-            --out-dir br-stm32-h5e4vkt6/Core/Inc/generated
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg \
-            --out-dir br-stm32-f767zi/Core/Inc/generated
-          python3 tools/msg2cdr.py --package robot_msgs --msg-dir msg \
-            --out-dir stm32-g431KBTx/stm32-g431KBTx_encoder_BNO085/Core/Inc/generated
+          python3 tools/msg2cdr.py --package can_msgs --msg transport_msgs/msg/Frame.msg \
+            --out-dir br-stm32-h5e4vkt6/Core/Inc/generated/transport
+          python3 tools/msg2cdr.py --package can_transport_msgs --msg transport_msgs/msg/FDFrame.msg \
+            --out-dir br-stm32-h5e4vkt6/Core/Inc/generated/transport
+          python3 tools/msg2cdr.py --package can_msgs --msg transport_msgs/msg/Frame.msg \
+            --out-dir br-stm32-f767zi/Core/Inc/generated/transport
+          python3 tools/msg2cdr.py --package can_transport_msgs --msg transport_msgs/msg/FDFrame.msg \
+            --out-dir br-stm32-f767zi/Core/Inc/generated/transport
 
       - name: Build and Run Host Unit Tests
         run: |

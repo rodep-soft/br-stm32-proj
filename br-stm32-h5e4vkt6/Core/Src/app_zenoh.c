@@ -76,7 +76,9 @@ static uint32_t can_fd_dlc_code(uint8_t length)
 static bool can_frame_matches_route(const can_frame_t *frame, const bridge_topic_t *topic)
 {
     const bool route_is_fd = topic->frame_mode == BRIDGE_FRAME_FD;
-    return frame->bus == topic->bus && frame->is_fd == route_is_fd;
+    const bool route_matches_bus =
+        topic->bus == BRIDGE_CAN_ANY || frame->bus == topic->bus;
+    return route_matches_bus && frame->is_fd == route_is_fd;
 }
 
 extern FDCAN_HandleTypeDef hfdcan1;
@@ -180,6 +182,10 @@ static void can_hardware_init(void) {
 /* Direct thread-safe CAN transmission supporting Standard (11-bit) and Extended (29-bit) IDs */
 static bool can_send_frame_ex(bridge_can_bus_t bus, uint8_t frame_mode, uint32_t id,
                               const uint8_t *data, uint8_t dlc, bool is_extended, bool is_rtr) {
+    if (!netif_is_link_up(&gnetif)) {
+        g_bridge.drop_count++;
+        return false;
+    }
     if (data == NULL) {
         g_bridge.drop_count++;
         return false;
@@ -280,7 +286,17 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
 static const char *const g_zenoh_locators[] = { CONFIG_ZENOH_LOCATOR_LIST };
 #define ZENOH_LOCATOR_COUNT (sizeof(g_zenoh_locators) / sizeof(g_zenoh_locators[0]))
 
-static void wait_for_network(void) {
+static void configure_zenoh_session(z_owned_config_t *config) {
+    z_config_default(config);
+    zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
+        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
+            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
+        }
+    }
+}
+
+static bool wait_for_network(void) {
 #if (CONFIG_NET_USE_DHCP == 0)
     /* Instant static IP mode (< 1s boot) */
     printf("[ETH] Instant Static IP: %s\r\n", CONFIG_NET_STATIC_IP);
@@ -292,16 +308,22 @@ static void wait_for_network(void) {
     netif_set_up(&gnetif);
 
     uint32_t wait_count = 0;
-    while (!netif_is_link_up(&gnetif)) {
+    const uint32_t timeout_ticks = CONFIG_NET_LINK_TIMEOUT_SEC * 10U;
+    while (!netif_is_link_up(&gnetif) && wait_count < timeout_ticks) {
         if (wait_count++ % 30 == 0) {
             printf("[ETH] Waiting for Ethernet cable link (plug in cable to connect Zenoh)...\r\n");
         }
         osDelay(100);
     }
+    if (!netif_is_link_up(&gnetif)) {
+        printf("[ETH] Link timeout; CAN remains active, retrying Ethernet later.\r\n");
+        return false;
+    }
 #else
     printf("[ETH] Waiting for DHCP lease...\r\n");
     int sec = 0;
-    while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
+    while ((netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) &&
+           sec < CONFIG_NET_DHCP_TIMEOUT_SEC) {
         osDelay(1000);
         if (netif_is_link_up(&gnetif) && netif_dhcp_data(&gnetif) == NULL) {
             dhcp_start(&gnetif);
@@ -318,8 +340,12 @@ static void wait_for_network(void) {
             break;
         }
     }
+    if (gnetif.ip_addr.addr == 0) {
+        return false;
+    }
 #endif
     printf("[ETH] Link UP! IP: %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
+    return true;
 }
 
 /* ─────────── ROS 2 -> CAN: Direct Zero-Latency Callback ────────────── */
@@ -346,12 +372,12 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
         bool is_extended;
         bool is_rtr;
         if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
-            const can_msgs_FDFrame *cf = (const can_msgs_FDFrame *)msg_buffer;
+            const can_transport_msgs_FDFrame *cf = (const can_transport_msgs_FDFrame *)msg_buffer;
             id = cf->id;
-            dlc = cf->dlc;
+            dlc = cf->len;
             data = cf->data;
             is_extended = cf->is_extended;
-            is_rtr = cf->is_rtr;
+            is_rtr = false;
         } else {
             const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
             id = cf->id;
@@ -422,22 +448,17 @@ static void bridge_worker_task(void *arg) {
                     ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                     bool serialized;
                     if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
-                        can_msgs_FDFrame out_frame;
+                        can_transport_msgs_FDFrame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
-                        out_frame.header.sec = (int32_t)(now / 1000);
-                        out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
                         strncpy(out_frame.header.frame_id, "fdcan", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
-                        out_frame.is_rtr = frame.is_rtr;
-                        out_frame.dlc = frame.dlc;
+                        out_frame.len = frame.dlc;
                         memcpy(out_frame.data, frame.data, frame.dlc);
-                        serialized = can_msgs_FDFrame_serialize(&ub, &out_frame);
+                        serialized = can_transport_msgs_FDFrame_serialize(&ub, &out_frame);
                     } else {
                         can_msgs_Frame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
-                        out_frame.header.sec = (int32_t)(now / 1000);
-                        out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
                         strncpy(out_frame.header.frame_id, "can", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
@@ -539,24 +560,15 @@ static void zenoh_engine_task(void *arg) {
     printf("  STM32H5 Ultra-Thin Zenoh-CAN Bridge             \r\n");
     printf("==================================================\r\n");
 
-    wait_for_network();
-
     /* Open Zenoh session */
     z_owned_config_t config;
-    z_config_default(&config);
-    zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
-    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
-        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
-            zp_config_insert(z_loan_mut(config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
-        }
-    }
+    configure_zenoh_session(&config);
 
     z_result_t res;
     while ((res = z_open(&g_bridge.session, z_move(config), NULL)) < 0) {
         printf("[Zenoh] Connect failed (%d). Retry in 2s...\r\n", (int)res);
         osDelay(2000);
-        z_config_default(&config);
-        zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+        configure_zenoh_session(&config);
     }
     printf("[Zenoh] Connected to router!\r\n");
 
@@ -649,19 +661,28 @@ static void zenoh_engine_task(void *arg) {
 
 /* ───────────────────── Public Starter ──────────────────────────────── */
 
+static void network_start_task(void *arg) {
+    (void)arg;
+    MX_LWIP_Init();
+
+    while (!wait_for_network()) {
+        printf("[ETH-ERROR] Ethernet link unavailable; retrying indefinitely.\r\n");
+        osDelay(1000);
+    }
+    can_hardware_init();
+
+    xTaskCreate(zenoh_engine_task, "zenoh", CONFIG_STACK_ZENOH_TASK,
+                NULL, tskIDLE_PRIORITY + 2, NULL);
+    xTaskCreate(bridge_worker_task, "can_bridge", CONFIG_STACK_BRIDGE_TASK,
+                NULL, tskIDLE_PRIORITY + 3, NULL);
+    vTaskDelete(NULL);
+}
+
 void app_zenoh_start(void) {
     memset(&g_bridge, 0, sizeof(g_bridge));
     memset(g_runtimes, 0, sizeof(g_runtimes));
 
-    /* Initialize CAN hardware & queues BEFORE creating tasks to prevent NULL queue asserts */
-    can_hardware_init();
-    MX_LWIP_Init();
-
-    /* 1. Zenoh Manager + Diagnostics Loop (Single task) */
-    xTaskCreate(zenoh_engine_task, "zenoh", CONFIG_STACK_ZENOH_TASK,
-                NULL, tskIDLE_PRIORITY + 2, NULL);
-
-    /* 2. CAN->Zenoh High-Priority Reassembly Worker */
-    xTaskCreate(bridge_worker_task, "can_bridge", CONFIG_STACK_BRIDGE_TASK,
-                NULL, tskIDLE_PRIORITY + 3, NULL);
+    /* Ethernet is a hard prerequisite; CAN remains disabled without link. */
+    xTaskCreate(network_start_task, "net_init", 512,
+                NULL, tskIDLE_PRIORITY + 1, NULL);
 }
