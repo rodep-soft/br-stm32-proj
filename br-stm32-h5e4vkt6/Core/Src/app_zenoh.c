@@ -36,6 +36,7 @@ extern struct netif gnetif;
 
 typedef struct {
     uint32_t id;
+    uint32_t rx_tick;
     uint8_t  dlc;
     bool     is_extended;
     bool     is_rtr;
@@ -253,6 +254,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
             break;
         }
         if (g_rx_queue != NULL) {
+            frame.rx_tick = HAL_GetTick();
             if (rx_hdr.IdType == FDCAN_EXTENDED_ID) {
                 frame.id = rx_hdr.Identifier;
                 frame.is_extended = true;
@@ -424,8 +426,8 @@ static void bridge_worker_task(void *arg) {
                     if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
                         can_msgs_FDFrame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
-                        out_frame.header.sec = (int32_t)(now / 1000);
-                        out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
+                        out_frame.header.sec = (int32_t)(frame.rx_tick / 1000);
+                        out_frame.header.nanosec = (uint32_t)((frame.rx_tick % 1000) * 1000000);
                         strncpy(out_frame.header.frame_id, "fdcan", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
@@ -436,8 +438,8 @@ static void bridge_worker_task(void *arg) {
                     } else {
                         can_msgs_Frame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
-                        out_frame.header.sec = (int32_t)(now / 1000);
-                        out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
+                        out_frame.header.sec = (int32_t)(frame.rx_tick / 1000);
+                        out_frame.header.nanosec = (uint32_t)((frame.rx_tick % 1000) * 1000000);
                         strncpy(out_frame.header.frame_id, "can", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;

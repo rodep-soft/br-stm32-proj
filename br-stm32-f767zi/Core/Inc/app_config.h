@@ -203,11 +203,11 @@ static const bridge_topic_t g_bridge_topics[] = {
     // 成功！
     BRIDGE_CAN_TO_ROS("kokura_speak",  Ping,         0x400),
 
-    /* 5. Robstride CAN Bridge: ROS 2 -> CAN (robstride/can_tx) */
-    BRIDGE_ROS_TO_CAN_FRAME("robstride/can_tx"),
+    /* 5. Generic classic CAN transport: ROS 2 -> CAN */
+    BRIDGE_ROS_TO_CAN_FRAME("can/tx"),
 
-    /* 6. Robstride CAN Bridge: CAN -> ROS 2 (robstride/can_rx) */
-    BRIDGE_CAN_TO_ROS_FRAME("robstride/can_rx"),
+    /* 6. Generic classic CAN transport: CAN -> ROS 2 */
+    BRIDGE_CAN_TO_ROS_FRAME("can/rx"),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))

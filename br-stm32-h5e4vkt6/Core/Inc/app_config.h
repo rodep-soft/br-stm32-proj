@@ -233,10 +233,12 @@ static const bridge_topic_t g_bridge_topics[] = {
     BRIDGE_CAN_TO_ROS("kokura_speak", Ping, 0x400,
                       BRIDGE_FDCAN1, BRIDGE_FRAME_CLASSIC),
 
-    /* 5. Robstride CAN Bridge: ROS 2 -> CAN (robstride/can_tx) */
-    BRIDGE_ROS_TO_CAN_FD_FRAME("robstride/can_tx", BRIDGE_FDCAN2),
+    /* 5. Generic classic CAN transport for sensor gateways */
+    BRIDGE_ROS_TO_CAN_FRAME("can/tx", BRIDGE_FDCAN1),
+    BRIDGE_CAN_TO_ROS_FRAME("can/rx", BRIDGE_FDCAN1),
 
-    /* 6. Robstride CAN Bridge: CAN -> ROS 2 (robstride/can_rx) */
+    /* 6. Robstride CAN-FD transport */
+    BRIDGE_ROS_TO_CAN_FD_FRAME("robstride/can_tx", BRIDGE_FDCAN2),
     BRIDGE_CAN_TO_ROS_FD_FRAME("robstride/can_rx", BRIDGE_FDCAN2),
 };
 

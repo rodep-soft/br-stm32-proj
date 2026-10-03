@@ -58,10 +58,12 @@ if(MSG_FILES)
     add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
 endif()
 
+# Use custom FindThreads module to prevent linking -lpthreads in bare-metal toolchains
+list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+set(CMAKE_THREAD_LIBS_INIT "")
+
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
-
-list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
 set(ZP_PLATFORM "freertos_lwip" CACHE STRING "Zenoh-Pico platform" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static lib" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
@@ -103,7 +105,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Remove wrong libob.a library dependency when using cpp files
-list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
+list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob pthreads pthread)
 
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
