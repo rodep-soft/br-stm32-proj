@@ -63,6 +63,12 @@ ros2 node list
 ros2 topic echo /chatter
 ```
 
+フレーム受信tickも必要な場合は、`can_transport_msgs/msg/TimedFrame`（Classic）
+または`TimedFDFrame`（FD）の`can/timed_frames`・`canfd/timed_frames`を使用します。
+`rx_monotonic_ns`はSTM32のCAN受信時点の単調時計で、`timestamp_valid`がfalseの間は
+ROS時刻ではありません。ROS時刻との同期がない状態でPC到着時刻と混同しないため、
+時刻が必要な処理は`timestamp_valid`を必ず確認してください。
+
 ---
 
 ## 4. Zenoh 単体テスト (CLI)

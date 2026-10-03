@@ -19,6 +19,7 @@
 
 /* Generated message headers */
 #include "generated/transport/Frame.h"
+#include "generated/transport/TimedFrame.h"
 
 #ifdef __cplusplus
 extern "C" {
