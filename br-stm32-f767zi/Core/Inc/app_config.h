@@ -28,7 +28,7 @@ extern "C" {
  * 1. Network (Ethernet) Settings
  * ============================================================================== */
 // DHCPはなるべく使わないこと
-#define CONFIG_NET_USE_DHCP           0  /**< 0: Instant static IP (< 1s boot), 1: DHCP fallback */
+#define CONFIG_NET_USE_DHCP           0  /**< 0: static-first, 1: DHCP-first with static fallback */
 // stm32の静的(static)IP
 #define CONFIG_NET_STATIC_IP          "192.168.50.77"
 #define CONFIG_NET_STATIC_NETMASK     "255.255.255.0"
@@ -36,6 +36,7 @@ extern "C" {
 // これは部室用
 #define CONFIG_NET_STATIC_GATEWAY     "192.168.50.1"
 #define CONFIG_NET_DHCP_TIMEOUT_SEC   5
+#define CONFIG_NET_LINK_TIMEOUT_SEC   10
 
 /* ==============================================================================
  * 2. Zenoh & ROS 2 Settings

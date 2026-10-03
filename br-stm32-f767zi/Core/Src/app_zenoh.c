@@ -301,7 +301,7 @@ static void configure_zenoh_session(z_owned_config_t *config) {
     }
 }
 
-static void wait_for_network(void) {
+static bool wait_for_network(void) {
 #if (CONFIG_NET_USE_DHCP == 0)
     /* Instant static IP mode (< 1s boot) */
     printf("[ETH] Instant Static IP: %s\r\n", CONFIG_NET_STATIC_IP);
@@ -313,16 +313,22 @@ static void wait_for_network(void) {
     netif_set_up(&gnetif);
 
     uint32_t wait_count = 0;
-    while (!netif_is_link_up(&gnetif)) {
+    const uint32_t timeout_ticks = CONFIG_NET_LINK_TIMEOUT_SEC * 10U;
+    while (!netif_is_link_up(&gnetif) && wait_count < timeout_ticks) {
         if (wait_count++ % 30 == 0) {
             printf("[ETH] Waiting for Ethernet cable link (plug in cable to connect Zenoh)...\r\n");
         }
         osDelay(100);
     }
+    if (!netif_is_link_up(&gnetif)) {
+        printf("[ETH] Link timeout; CAN remains active, retrying Ethernet later.\r\n");
+        return false;
+    }
 #else
     printf("[ETH] Waiting for DHCP lease...\r\n");
     int sec = 0;
-    while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
+    while ((netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) &&
+           sec < CONFIG_NET_DHCP_TIMEOUT_SEC) {
         osDelay(1000);
         if (netif_is_link_up(&gnetif) && netif_dhcp_data(&gnetif) == NULL) {
             dhcp_start(&gnetif);
@@ -339,8 +345,12 @@ static void wait_for_network(void) {
             break;
         }
     }
+    if (gnetif.ip_addr.addr == 0) {
+        return false;
+    }
 #endif
     printf("[ETH] Link UP! IP: %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
+    return true;
 }
 
 /* ─────────── ROS 2 -> CAN: Direct Zero-Latency Callback ────────────── */
@@ -527,7 +537,9 @@ static void zenoh_engine_task(void const *arg) {
     printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
     printf("==================================================\r\n");
 
-    wait_for_network();
+    while (!wait_for_network()) {
+        osDelay(1000);
+    }
 
     /* Open Zenoh session */
     z_owned_config_t config;
