@@ -291,6 +291,16 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 static const char *const g_zenoh_locators[] = { CONFIG_ZENOH_LOCATOR_LIST };
 #define ZENOH_LOCATOR_COUNT (sizeof(g_zenoh_locators) / sizeof(g_zenoh_locators[0]))
 
+static void configure_zenoh_session(z_owned_config_t *config) {
+    z_config_default(config);
+    zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
+        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
+            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
+        }
+    }
+}
+
 static void wait_for_network(void) {
 #if (CONFIG_NET_USE_DHCP == 0)
     /* Instant static IP mode (< 1s boot) */
@@ -521,20 +531,13 @@ static void zenoh_engine_task(void const *arg) {
 
     /* Open Zenoh session */
     z_owned_config_t config;
-    z_config_default(&config);
-    zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
-    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
-        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
-            zp_config_insert(z_loan_mut(config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
-        }
-    }
+    configure_zenoh_session(&config);
 
     z_result_t res;
     while ((res = z_open(&g_bridge.session, z_move(config), NULL)) < 0) {
         printf("[Zenoh] Connect failed (%d). Retry in 2s...\r\n", (int)res);
         osDelay(2000);
-        z_config_default(&config);
-        zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+        configure_zenoh_session(&config);
     }
     printf("[Zenoh] Connected to router!\r\n");
 

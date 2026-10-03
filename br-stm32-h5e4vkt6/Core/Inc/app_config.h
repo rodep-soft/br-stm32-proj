@@ -31,7 +31,7 @@ extern "C" {
 // DHCPはなるべく使わないこと
 #define CONFIG_NET_USE_DHCP           0  /**< 0: Instant static IP (< 1s boot), 1: DHCP fallback */
 // stm32の静的(static)IP
-#define CONFIG_NET_STATIC_IP          "192.168.50.77"
+#define CONFIG_NET_STATIC_IP          "192.168.50.78"
 #define CONFIG_NET_STATIC_NETMASK     "255.255.255.0"
 
 // これは部室用
