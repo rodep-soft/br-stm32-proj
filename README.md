@@ -70,6 +70,12 @@ ingressからの出力topicは通常入力と同じ`can/frames`・`canfd/frames`
 ROS時刻ではありません。ROS時刻との同期がない状態でPC到着時刻と混同しないため、
 時刻が必要な処理は`timestamp_valid`を必ず確認してください。
 
+IMUを別STM32からCAN-FDで送る場合は、IMU payloadに計測時刻を含めて透過転送します。
+PC側の`imu_can_decoder`がCAN ID `0x500`の18 byte frameをdecodeし、`0x510`の同期要求に
+対するIMU側の`0x511`応答からPCとのclock offsetを推定します。同期成立前は計測時刻を
+ROS時刻としてpublishしません。bridge STM32はこのプロトコルを解釈せず、通常の
+`canfd/tx`・`canfd/frames`として転送します。
+
 ---
 
 ## 4. Zenoh 単体テスト (CLI)
