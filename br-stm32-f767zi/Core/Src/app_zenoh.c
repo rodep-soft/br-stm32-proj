@@ -33,7 +33,6 @@ extern struct netif gnetif;
 
 typedef struct {
     uint32_t id;
-    uint32_t rx_tick;
     uint8_t  dlc;
     bool     is_extended;
     bool     is_rtr;
@@ -266,7 +265,6 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &rx_hdr, frame.data) == HAL_OK) {
         if (g_rx_queue != NULL) {
-            frame.rx_tick = HAL_GetTick();
             if (rx_hdr.IDE == CAN_ID_EXT) {
                 frame.id = rx_hdr.ExtId;
                 frame.is_extended = true;
@@ -414,8 +412,6 @@ static void bridge_worker_task(void const *arg) {
 
                     can_msgs_Frame out_frame;
                     memset(&out_frame, 0, sizeof(out_frame));
-                    out_frame.header.sec = (int32_t)(frame.rx_tick / 1000);
-                    out_frame.header.nanosec = (uint32_t)((frame.rx_tick % 1000) * 1000000);
                     strncpy(out_frame.header.frame_id, "can1", sizeof(out_frame.header.frame_id) - 1);
                     out_frame.id = frame.id;
                     out_frame.is_extended = frame.is_extended;
