@@ -351,7 +351,7 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
 
     /* Raw CAN Frame -> Direct CAN TX */
     if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
-        const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
+        const can_transport_msgs_Frame *cf = (const can_transport_msgs_Frame *)msg_buffer;
         printf("[RAW-TX] id=0x%08lX ext=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
                (unsigned long)cf->id, cf->is_extended, cf->dlc,
                cf->data[0], cf->data[1], cf->data[2], cf->data[3],
@@ -410,7 +410,7 @@ static void bridge_worker_task(void const *arg) {
                 if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
                     topic_runtime_t *rt = &g_runtimes[i];
 
-                    can_msgs_Frame out_frame;
+                    can_transport_msgs_Frame out_frame;
                     memset(&out_frame, 0, sizeof(out_frame));
                     strncpy(out_frame.header.frame_id, "can1", sizeof(out_frame.header.frame_id) - 1);
                     out_frame.id = frame.id;
@@ -422,7 +422,7 @@ static void bridge_worker_task(void const *arg) {
 
                     ucdrBuffer ub;
                     ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
-                    if (can_msgs_Frame_serialize(&ub, &out_frame)) {
+                    if (can_transport_msgs_Frame_serialize(&ub, &out_frame)) {
                         zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
                         g_bridge.can_to_zenoh_count++;
                         HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);

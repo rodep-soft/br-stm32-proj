@@ -152,12 +152,12 @@ static void test_motor_command_roundtrip(void) {
 }
 
 /* ==============================================================================
- * Test 3: can_msgs/Frame CDR Serialization
+ * Test 3: can_transport_msgs/Frame CDR Serialization
  * ============================================================================== */
-static void test_can_msgs_frame_roundtrip(void) {
-    printf("[TEST] Running test_can_msgs_frame_roundtrip...\n");
+static void test_transport_frame_roundtrip(void) {
+    printf("[TEST] Running test_transport_frame_roundtrip...\n");
 
-    can_msgs_Frame orig = {
+    can_transport_msgs_Frame orig = {
         .header = {
             .sec = 1700000000,
             .nanosec = 500000,
@@ -175,21 +175,21 @@ static void test_can_msgs_frame_roundtrip(void) {
     ucdrBuffer writer;
     ucdr_init_buffer(&writer, cdr_buf, sizeof(cdr_buf));
 
-    ASSERT_TRUE(can_msgs_Frame_serialize(&writer, &orig));
+    ASSERT_TRUE(can_transport_msgs_Frame_serialize(&writer, &orig));
     size_t len = ucdr_buffer_length(&writer);
 
-    can_msgs_Frame restored;
+    can_transport_msgs_Frame restored;
     memset(&restored, 0, sizeof(restored));
     ucdrBuffer reader;
     ucdr_init_buffer(&reader, cdr_buf, len);
 
-    ASSERT_TRUE(can_msgs_Frame_deserialize(&reader, &restored));
+    ASSERT_TRUE(can_transport_msgs_Frame_deserialize(&reader, &restored));
     ASSERT_TRUE(restored.id == orig.id);
     ASSERT_TRUE(restored.dlc == orig.dlc);
     ASSERT_TRUE(memcmp(restored.data, orig.data, 8) == 0);
     ASSERT_TRUE(strcmp(restored.header.frame_id, "can0") == 0);
 
-    printf("       test_can_msgs_frame_roundtrip: PASSED ✅\n");
+    printf("       test_transport_frame_roundtrip: PASSED ✅\n");
 }
 
 /* ==============================================================================
@@ -468,7 +468,7 @@ static void test_generic_raw_bridge(void) {
 
     /* 1. PC -> STM32: an arbitrary extended frame */
     uint32_t enable_ext_id = 0x18FF0101U;
-    can_msgs_Frame pc_cmd = {
+    can_transport_msgs_Frame pc_cmd = {
         .header = {.sec = 123456, .nanosec = 789000, .frame_id = "can1"},
         .id = enable_ext_id,
         .is_rtr = false,
@@ -481,15 +481,15 @@ static void test_generic_raw_bridge(void) {
     uint8_t cdr_buf[128];
     ucdrBuffer writer;
     ucdr_init_buffer(&writer, cdr_buf, sizeof(cdr_buf));
-    ASSERT_TRUE(can_msgs_Frame_serialize(&writer, &pc_cmd));
+    ASSERT_TRUE(can_transport_msgs_Frame_serialize(&writer, &pc_cmd));
     size_t len = ucdr_buffer_length(&writer);
 
     /* STM32 receives and deserializes */
-    can_msgs_Frame stm_rx;
+    can_transport_msgs_Frame stm_rx;
     memset(&stm_rx, 0, sizeof(stm_rx));
     ucdrBuffer reader;
     ucdr_init_buffer(&reader, cdr_buf, len);
-    ASSERT_TRUE(can_msgs_Frame_deserialize(&reader, &stm_rx));
+    ASSERT_TRUE(can_transport_msgs_Frame_deserialize(&reader, &stm_rx));
     ASSERT_TRUE(stm_rx.id == enable_ext_id);
     ASSERT_TRUE(stm_rx.is_extended == true);
     ASSERT_TRUE(stm_rx.dlc == 8);
@@ -498,7 +498,7 @@ static void test_generic_raw_bridge(void) {
     uint32_t fb_ext_id = 0x1ABCDE01U;
     uint8_t fb_data[8] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0x00, 0xFA};
 
-    can_msgs_Frame stm_to_pc;
+    can_transport_msgs_Frame stm_to_pc;
     memset(&stm_to_pc, 0, sizeof(stm_to_pc));
     stm_to_pc.id = fb_ext_id;
     stm_to_pc.is_extended = true;
@@ -506,14 +506,14 @@ static void test_generic_raw_bridge(void) {
     memcpy(stm_to_pc.data, fb_data, 8);
 
     ucdr_init_buffer(&writer, cdr_buf, sizeof(cdr_buf));
-    ASSERT_TRUE(can_msgs_Frame_serialize(&writer, &stm_to_pc));
+    ASSERT_TRUE(can_transport_msgs_Frame_serialize(&writer, &stm_to_pc));
     len = ucdr_buffer_length(&writer);
 
     /* PC receives feedback */
-    can_msgs_Frame pc_rx;
+    can_transport_msgs_Frame pc_rx;
     memset(&pc_rx, 0, sizeof(pc_rx));
     ucdr_init_buffer(&reader, cdr_buf, len);
-    ASSERT_TRUE(can_msgs_Frame_deserialize(&reader, &pc_rx));
+    ASSERT_TRUE(can_transport_msgs_Frame_deserialize(&reader, &pc_rx));
     ASSERT_TRUE(pc_rx.id == fb_ext_id);
     ASSERT_TRUE(pc_rx.is_extended == true);
     ASSERT_TRUE(memcmp(pc_rx.data, fb_data, 8) == 0);
@@ -531,7 +531,7 @@ int main(void) {
 
     test_imu_data_roundtrip();
     test_motor_command_roundtrip();
-    test_can_msgs_frame_roundtrip();
+    test_transport_frame_roundtrip();
     test_ping_roundtrip();
     test_fragmentation_and_reassembly();
     test_packet_loss_self_healing();

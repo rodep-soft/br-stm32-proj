@@ -36,6 +36,7 @@ GEN_DIR      := $(PROJECT_DIR)/Core/Inc/generated
 PYTHON       := python3
 CODEGEN      := tools/msg2cdr.py
 MSG_DIR      := msg
+TRANSPORT_MSG_DIR := transport_msgs/msg
 
 # Flashing Tool Settings
 FLASH_ADDR   := 0x08000000
@@ -156,6 +157,7 @@ dev shell:
 msg:
 	@echo "==> [CodeGen] Generating Micro-CDR headers from .msg files..."
 	@$(PYTHON) $(CODEGEN) --package robot_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
+	@$(PYTHON) $(CODEGEN) --package can_transport_msgs --msg-dir $(TRANSPORT_MSG_DIR) --out-dir $(GEN_DIR)/transport
 
 ## -----------------------------------------------------------------------------
 ## Build Targets (Auto-delegates to Nix if tools not in PATH)

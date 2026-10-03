@@ -16,8 +16,8 @@
 #include "generated/ImuData.h"
 #include "generated/MotorCommand.h"
 #include "generated/Ping.h"
-#include "generated/Frame.h"
-#include "generated/FDFrame.h"
+#include "generated/transport/Frame.h"
+#include "generated/transport/FDFrame.h"
 
 /* Bridge types from app_config.h */
 typedef enum {
