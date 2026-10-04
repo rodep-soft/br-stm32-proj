@@ -24,6 +24,7 @@
 #include "lwip/prot/dhcp.h"
 
 #include <zenoh-pico.h>
+#include <zenoh-pico/net/session.h>
 #include "zenoh_ros2.h"
 #include "app_config.h"
 
@@ -75,6 +76,7 @@ typedef struct {
 
 static bridge_t g_bridge;
 static zenoh_ros2_pub_t g_timed_pub;
+static volatile uint32_t g_consecutive_tx_errors = 0;
 
 /* ───────────────────── CAN Hardware & Filter Setup ─────────────────── */
 
@@ -454,7 +456,15 @@ static void bridge_worker_task(void const *arg) {
                     ucdrBuffer ub;
                     ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                     if (can_msgs_Frame_serialize(&ub, &out_frame)) {
-                        zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
+                        if (zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub))) {
+                            g_consecutive_tx_errors = 0;
+                        } else {
+                            g_consecutive_tx_errors++;
+                            if (g_consecutive_tx_errors >= 5) {
+                                printf("[Zenoh-TX] Send failure detected! Fast-tripping reconnect...\r\n");
+                                g_bridge.zenoh_ready = false;
+                            }
+                        }
                         can_transport_msgs_TimedFrame timed = {0};
                         strncpy(timed.header.frame_id, "can", sizeof(timed.header.frame_id) - 1);
                         timed.id = frame.id;
@@ -529,18 +539,26 @@ static void bridge_worker_task(void const *arg) {
                         ucdrBuffer ub;
                         ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                         if (t->serialize_fn(&ub, rt->buffer)) {
-                            zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
-                            g_bridge.can_to_zenoh_count++;
-                            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+                            if (zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub))) {
+                                g_consecutive_tx_errors = 0;
+                                g_bridge.can_to_zenoh_count++;
+                                HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
 
-                            static uint32_t last_tx_print = 0;
-                            if (now - last_tx_print >= 1000) {
-                                last_tx_print = now;
-                                printf("[ROS-TX] /%s: ", t->topic_name);
-                                if (t->print_fn != NULL) {
-                                    t->print_fn(rt->buffer);
-                                } else {
-                                    printf("(%zu bytes)\r\n", t->msg_size);
+                                static uint32_t last_tx_print = 0;
+                                if (now - last_tx_print >= 1000) {
+                                    last_tx_print = now;
+                                    printf("[ROS-TX] /%s: ", t->topic_name);
+                                    if (t->print_fn != NULL) {
+                                        t->print_fn(rt->buffer);
+                                    } else {
+                                        printf("(%zu bytes)\r\n", t->msg_size);
+                                    }
+                                }
+                            } else {
+                                g_consecutive_tx_errors++;
+                                if (g_consecutive_tx_errors >= 5) {
+                                    printf("[Zenoh-TX] Send failure detected! Fast-tripping reconnect...\r\n");
+                                    g_bridge.zenoh_ready = false;
                                 }
                             }
                         }
@@ -552,49 +570,57 @@ static void bridge_worker_task(void const *arg) {
     }
 }
 
-/* ───────────────────── Main Zenoh Engine Task ──────────────────────── */
+/* ───────────────────── Session Reconnection & Teardown ───────────────── */
 
-static void zenoh_engine_task(void const *arg) {
-    (void)arg;
-
-    printf("\r\n==================================================\r\n");
-    printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
-    printf("==================================================\r\n");
-
-    /* Open Zenoh session */
-    z_owned_config_t config;
-    configure_zenoh_session(&config);
-
-    z_result_t res;
-    while ((res = z_open(&g_bridge.session, z_move(config), NULL)) < 0) {
-        printf("[Zenoh] Connect failed (%d). Retry in 2s...\r\n", (int)res);
-        osDelay(2000);
-        configure_zenoh_session(&config);
+static void teardown_zenoh_session(void) {
+    if (!g_bridge.zenoh_ready && !z_internal_check(g_bridge.session)) {
+        return;
     }
-    printf("[Zenoh] Connected to router!\r\n");
+    printf("[Zenoh] Tearing down session for clean reconnect...\r\n");
+    g_bridge.zenoh_ready = false;
+    osDelay(50);
 
-    /* Init ROS 2 Node */
+    zenoh_ros2_pub_destroy(&g_timed_pub);
+
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        const bridge_topic_t *t = &g_bridge_topics[i];
+        topic_runtime_t *rt = &g_runtimes[i];
+        if (t->dir == BRIDGE_DIR_CAN_TO_ROS || t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
+            zenoh_ros2_pub_destroy(&rt->pub);
+        } else if (t->dir == BRIDGE_DIR_ROS_TO_CAN || t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
+            zenoh_ros2_sub_destroy(&rt->sub);
+        }
+    }
+
+    zenoh_ros2_node_fini(&g_bridge.node);
+
+    if (z_internal_check(g_bridge.session)) {
+        zp_stop_read_task(z_loan_mut(g_bridge.session));
+        zp_stop_lease_task(z_loan_mut(g_bridge.session));
+        z_close(z_loan_mut(g_bridge.session), NULL);
+        z_drop(z_move(g_bridge.session));
+    }
+
+    printf("[Zenoh] Session destroyed. Ready for fresh reconnection.\r\n");
+}
+
+static bool init_ros2_entities(void) {
     if (!zenoh_ros2_node_init(&g_bridge.node, &g_bridge.session,
                               CONFIG_ROS2_NODE_NAME, CONFIG_ROS2_NODE_NS, CONFIG_ROS2_DOMAIN_ID)) {
         printf("[ROS2] Node init failed!\r\n");
-        return;
+        return false;
     }
+
     zenoh_ros2_pub_create(&g_timed_pub, &g_bridge.node, "can/timed_frames",
                           can_transport_msgs_TimedFrame_DDS_TYPE,
                           can_transport_msgs_TimedFrame_TYPE_HASH);
 
-    /* Auto-register topics from declarative master table */
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         topic_runtime_t *rt = &g_runtimes[i];
 
-        printf("[Bridge] Registering [%u] %s (heap: %u)\r\n",
-               (unsigned)i, t->topic_name, (unsigned)xPortGetFreeHeapSize());
-
         if (t->dir == BRIDGE_DIR_CAN_RECV) {
-            printf("  [RECV] %-16s : CAN 0x%03lX (Standalone Receiver)\r\n",
-                   t->topic_name, (unsigned long)t->can_base_id);
             continue;
         }
 
@@ -610,65 +636,166 @@ static void zenoh_engine_task(void const *arg) {
                    t->topic_name, (unsigned long)t->can_base_id,
                    (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames,
                    ok ? "OK" : "FAIL");
+            if (!ok) return false;
         } else if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
             bool ok = zenoh_ros2_pub_create(&rt->pub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash);
             printf("  [PUB] /%-16s -> Raw CAN Frame Bridge [%s]\r\n", t->topic_name, ok ? "OK" : "FAIL");
+            if (!ok) return false;
         } else if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
             bool ok = zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
-                                  on_zenoh_sub_message, (void *)i);
+                                            on_zenoh_sub_message, (void *)i);
             printf("  [SUB] /%-16s <- Raw CAN Frame Bridge [%s]\r\n", t->topic_name, ok ? "OK" : "FAIL");
+            if (!ok) return false;
         } else {
             bool ok = zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
-                                  on_zenoh_sub_message, (void *)i);
+                                            on_zenoh_sub_message, (void *)i);
             printf("  [SUB] /%-16s <- CAN 0x%03lX..0x%03lX (%u frames) [%s]\r\n",
                    t->topic_name, (unsigned long)t->can_base_id,
                    (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames,
                    ok ? "OK" : "FAIL");
+            if (!ok) return false;
         }
     }
     printf("[Bridge] Free heap after topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
+    return true;
+}
 
-    zp_start_read_task(z_loan_mut(g_bridge.session), NULL);
-    zp_start_lease_task(z_loan_mut(g_bridge.session), NULL);
+/* ───────────────────── Main Zenoh Engine Task ──────────────────────── */
 
-    g_bridge.zenoh_ready = true;
-    printf("[Bridge] Active! 2-Task Ultra-Thin Engine Running.\r\n");
+static void zenoh_engine_task(void const *arg) {
+    (void)arg;
 
-    /* Embedded Diagnostics & Watchdog Loop (replaces separate stats task) */
+    printf("\r\n==================================================\r\n");
+    printf("  STM32F767ZI Ultra-Thin Zenoh-CAN Bridge         \r\n");
+    printf("  Auto-Reconnect: AGGRESSIVE PERSISTENT MODE     \r\n");
+    printf("==================================================\r\n");
+
+    uint32_t reconnect_attempts = 0;
+
     for (;;) {
-        osDelay(CONFIG_CAN_STATS_PERIOD_MS);
+        /* 1. Physical Ethernet link check */
+        while (!netif_is_link_up(&gnetif)) {
+            HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+            printf("[ETH] Physical link DOWN. Waiting for cable...\r\n");
+            osDelay(500);
+        }
 
-        uint32_t esr = CAN1->ESR;
-        uint8_t tec = (uint8_t)((esr >> 16) & 0xFF);
-        uint8_t rec = (uint8_t)((esr >> 24) & 0xFF);
-        uint8_t lec = (uint8_t)((esr >> 4) & 0x07);
-        static const char *const lec_names[] = {
-            "None", "Stuff", "Form", "Ack", "BitRec", "BitDom", "CRC", "SW"
-        };
-        bool boff = (esr & (1U << 2)) != 0;
-        bool pass = (esr & (1U << 1)) != 0;
+        /* 2. Open Zenoh session with persistent retry (500ms intervals) */
+        reconnect_attempts++;
+        printf("[Zenoh] [%lu] Connecting to router (%s)...\r\n",
+               (unsigned long)reconnect_attempts, g_zenoh_locators[0]);
 
-        uint32_t now = HAL_GetTick();
-        bool timeout_alert = false;
+        z_owned_config_t config;
+        configure_zenoh_session(&config);
 
-        for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
-            const bridge_topic_t *t = &g_bridge_topics[i];
-            if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
-            topic_runtime_t *rt = &g_runtimes[i];
-            if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_MS) {
-                printf("[WATCHDOG] /%s timeout!\r\n", t->topic_name);
-                timeout_alert = true;
+        z_result_t res = z_open(&g_bridge.session, z_move(config), NULL);
+        if (res < 0) {
+            HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+            if (reconnect_attempts % 6 == 1) {
+                printf("[Zenoh] Connect failed (%d). Retrying aggressively every 500ms...\r\n", (int)res);
+            }
+            osDelay(500);
+            continue;
+        }
+
+        printf("[Zenoh] Connected to router! Initializing ROS 2 entities...\r\n");
+
+        /* 3. Initialize ROS 2 entities */
+        if (!init_ros2_entities()) {
+            printf("[ROS2] Entity declaration failed! Cleaning up and retrying...\r\n");
+            teardown_zenoh_session();
+            osDelay(500);
+            continue;
+        }
+
+        /* 4. Start Zenoh Background Tasks */
+        zp_start_read_task(z_loan_mut(g_bridge.session), NULL);
+        zp_start_lease_task(z_loan_mut(g_bridge.session), NULL);
+
+        g_bridge.zenoh_ready = true;
+        g_consecutive_tx_errors = 0;
+        reconnect_attempts = 0;
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+        printf("[Bridge] ACTIVE & ONLINE! Connected to Zenoh & ROS 2.\r\n");
+
+        /* 5. Health Monitoring & Watchdog Loop */
+        uint32_t last_stats_tick = 0;
+
+        while (g_bridge.zenoh_ready) {
+            osDelay(500);
+
+            /* Check A: Physical Ethernet Link */
+            if (!netif_is_link_up(&gnetif)) {
+                printf("[Zenoh-MON] Ethernet physical link lost!\r\n");
+                break;
+            }
+
+            /* Check B: Session Closed */
+            if (z_session_is_closed(z_loan(g_bridge.session))) {
+                printf("[Zenoh-MON] Zenoh session was closed!\r\n");
+                break;
+            }
+
+            /* Check C: Background Read Task Health */
+            if (!zp_read_task_is_running(z_loan(g_bridge.session))) {
+                printf("[Zenoh-MON] Zenoh background read task exited!\r\n");
+                break;
+            }
+
+            /* Check D: Background Lease Task Health */
+            if (!zp_lease_task_is_running(z_loan(g_bridge.session))) {
+                printf("[Zenoh-MON] Zenoh lease task exited!\r\n");
+                break;
+            }
+
+            /* Check E: Router Peer Link State */
+            if (!_z_session_has_router_peer(_Z_RC_IN_VAL(z_loan(g_bridge.session)))) {
+                printf("[Zenoh-MON] Router peer dropped/expired!\r\n");
+                break;
+            }
+
+            uint32_t now = HAL_GetTick();
+
+            /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
+            if (now - last_stats_tick >= CONFIG_CAN_STATS_PERIOD_MS) {
+                last_stats_tick = now;
+
+                uint32_t esr = CAN1->ESR;
+                uint8_t tec = (uint8_t)((esr >> 16) & 0xFF);
+                uint8_t rec = (uint8_t)((esr >> 24) & 0xFF);
+                uint8_t lec = (uint8_t)((esr >> 4) & 0x07);
+                static const char *const lec_names[] = {
+                    "None", "Stuff", "Form", "Ack", "BitRec", "BitDom", "CRC", "SW"
+                };
+                bool boff = (esr & (1U << 2)) != 0;
+                bool pass = (esr & (1U << 1)) != 0;
+
+                bool timeout_alert = false;
+                for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+                    const bridge_topic_t *t = &g_bridge_topics[i];
+                    if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+                    topic_runtime_t *rt = &g_runtimes[i];
+                    if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_MS) {
+                        printf("[WATCHDOG] /%s timeout!\r\n", t->topic_name);
+                        timeout_alert = true;
+                    }
+                }
+
+                HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, (boff || pass || timeout_alert) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+                printf("[Stats] CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | TEC:%u REC:%u LEC:%s(%u)%s%s | DROP:%lu\r\n",
+                       (unsigned long)g_bridge.can_to_zenoh_count, (unsigned long)g_bridge.zenoh_to_can_count,
+                       (unsigned long)g_bridge.raw_rx_frames, (unsigned long)g_bridge.raw_tx_frames,
+                       tec, rec, lec_names[lec], lec, boff ? " [BOFF]" : "", pass ? " [PASS]" : "",
+                       (unsigned long)g_bridge.drop_count);
             }
         }
 
-        /* Red LED alert on bus errors or topic silence */
-        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, (boff || pass || timeout_alert) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
-        printf("[Stats] CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | TEC:%u REC:%u LEC:%s(%u)%s%s | DROP:%lu\r\n",
-               (unsigned long)g_bridge.can_to_zenoh_count, (unsigned long)g_bridge.zenoh_to_can_count,
-               (unsigned long)g_bridge.raw_rx_frames, (unsigned long)g_bridge.raw_tx_frames,
-               tec, rec, lec_names[lec], lec, boff ? " [BOFF]" : "", pass ? " [PASS]" : "",
-               (unsigned long)g_bridge.drop_count);
+        /* 6. Disconnected: Full Teardown and Immediate Reconnection */
+        HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+        teardown_zenoh_session();
+        printf("[Zenoh] Reconnection sequence engaged (next try in 500ms)...\r\n");
+        osDelay(500);
     }
 }
 

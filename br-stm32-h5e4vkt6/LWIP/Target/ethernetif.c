@@ -102,6 +102,45 @@ void HAL_ETH_ErrorCallback(ETH_HandleTypeDef *handler)
   }
 }
 
+static void ethernet_link_thread(void *argument)
+{
+  struct netif *netif = (struct netif *)argument;
+  int32_t prev_state = -999;
+
+  for (;;) {
+    int32_t state = LAN8742_GetLinkState(&lan8742);
+    if (state != prev_state) {
+      prev_state = state;
+      if (state > LAN8742_STATUS_LINK_DOWN) {
+        ETH_MACConfigTypeDef mac_config;
+        HAL_ETH_GetMACConfig(&heth, &mac_config);
+        if (state == LAN8742_STATUS_100MBITS_FULLDUPLEX) {
+          mac_config.DuplexMode = ETH_FULLDUPLEX_MODE;
+          mac_config.Speed = ETH_SPEED_100M;
+        } else if (state == LAN8742_STATUS_100MBITS_HALFDUPLEX) {
+          mac_config.DuplexMode = ETH_HALFDUPLEX_MODE;
+          mac_config.Speed = ETH_SPEED_100M;
+        } else if (state == LAN8742_STATUS_10MBITS_FULLDUPLEX) {
+          mac_config.DuplexMode = ETH_FULLDUPLEX_MODE;
+          mac_config.Speed = ETH_SPEED_10M;
+        } else {
+          mac_config.DuplexMode = ETH_HALFDUPLEX_MODE;
+          mac_config.Speed = ETH_SPEED_10M;
+        }
+        HAL_ETH_SetMACConfig(&heth, &mac_config);
+        HAL_ETH_Start_IT(&heth);
+        netif_set_up(netif);
+        netif_set_link_up(netif);
+      } else {
+        HAL_ETH_Stop_IT(&heth);
+        netif_set_down(netif);
+        netif_set_link_down(netif);
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+}
+
 static void low_level_init(struct netif *netif)
 {
   static uint8_t mac_address[6] = {0x00, 0x80, 0xE1, 0x00, 0x00, 0x00};
@@ -126,8 +165,8 @@ static void low_level_init(struct netif *netif)
 
   xTaskCreate(ethernetif_input, "EthIf", ETH_INTERFACE_STACK, netif,
               configMAX_PRIORITIES - 2U, &input_task);
-  netif_set_up(netif);
-  netif_set_link_up(netif);
+  xTaskCreate(ethernet_link_thread, "EthLink", 256, netif,
+              configMAX_PRIORITIES - 3U, NULL);
 }
 
 static err_t low_level_output(struct netif *netif, struct pbuf *p)

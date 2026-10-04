@@ -81,6 +81,9 @@ list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 # Configure zenoh-pico for FreeRTOS + LwIP
 set(ZP_PLATFORM "freertos_lwip" CACHE STRING "Zenoh-Pico platform" FORCE)
+set(Z_TRANSPORT_LEASE 3000 CACHE STRING "Link lease duration in milliseconds" FORCE)
+set(Z_TRANSPORT_LEASE_EXPIRE_FACTOR 3 CACHE STRING "Session lease expire factor" FORCE)
+set(Z_TRANSPORT_CONNECT_TIMEOUT 1000 CACHE STRING "Link connect timeout in milliseconds" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static lib" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
