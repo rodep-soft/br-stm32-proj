@@ -46,7 +46,10 @@ TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN PV */
-
+uint16_t pos1 = 0;
+uint16_t pos2 = 0;
+uint16_t prev1 = 0;
+uint16_t prev2 = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -97,7 +100,8 @@ int main(void)
   MX_TIM1_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-
+  HAL_TIM_ENCODER_Start(&htim1, TIM_CHANNEL_ALL);
+  HAL_TIM_ENCODER_Start(&htim2, TIM_CHANNEL_ALL);
   /* USER CODE END 2 */
 
   /* Infinite loop */
