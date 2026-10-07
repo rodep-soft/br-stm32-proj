@@ -27,6 +27,9 @@
 #include <zenoh-pico/net/session.h>
 #include "zenoh_ros2.h"
 #include "app_config.h"
+#include "app_log.h"
+#include "health.h"
+#include "bridge_core.h"
 
 extern struct netif gnetif;
 
@@ -203,10 +206,6 @@ static void can_hardware_init(void) {
 
 /* Direct thread-safe CAN transmission supporting Standard (11-bit) and Extended (29-bit) IDs */
 static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, bool is_extended, bool is_rtr) {
-    if (!netif_is_link_up(&gnetif)) {
-        g_bridge.drop_count++;
-        return false;
-    }
     if (data == NULL) {
         g_bridge.drop_count++;
         return false;
@@ -324,8 +323,9 @@ static bool wait_for_network(void) {
     uint32_t wait_count = 0;
     const uint32_t timeout_ticks = CONFIG_NET_LINK_TIMEOUT_SEC * 10U;
     while (!netif_is_link_up(&gnetif) && wait_count < timeout_ticks) {
+        health_kick();
         if (wait_count++ % 30 == 0) {
-            printf("[ETH] Waiting for Ethernet cable link (plug in cable to connect Zenoh)...\r\n");
+            LOGI("eth", "Waiting for Ethernet cable link...");
         }
         osDelay(100);
     }
@@ -411,14 +411,17 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
 
 /* ─────────── CAN -> ROS 2: Reassembly Worker Task ──────────────────── */
 
+static volatile uint32_t g_bridge_worker_heartbeat = 0;
+
 static void bridge_worker_task(void const *arg) {
     (void)arg;
-    printf("[Bridge] CAN worker running (DTCM-RAM)\r\n");
+    LOGI("bridge", "CAN worker running (DTCM-RAM)");
 
     can_frame_t frame;
     uint8_t cdr_buf[256];
 
     for (;;) {
+        g_bridge_worker_heartbeat = HAL_GetTick();
         if (g_rx_queue == NULL) {
             osDelay(10);
             continue;
@@ -443,6 +446,7 @@ static void bridge_worker_task(void const *arg) {
                 if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
                     topic_runtime_t *rt = &g_runtimes[i];
 
+                    uint8_t clamped_dlc = bridge_clamp_dlc(frame.dlc);
                     can_msgs_Frame out_frame;
                     memset(&out_frame, 0, sizeof(out_frame));
                     strncpy(out_frame.header.frame_id, "can1", sizeof(out_frame.header.frame_id) - 1);
@@ -450,8 +454,8 @@ static void bridge_worker_task(void const *arg) {
                     out_frame.is_extended = frame.is_extended;
                     out_frame.is_rtr = frame.is_rtr;
                     out_frame.is_error = false;
-                    out_frame.dlc = frame.dlc;
-                    memcpy(out_frame.data, frame.data, frame.dlc > 8 ? 8 : frame.dlc);
+                    out_frame.dlc = clamped_dlc;
+                    memcpy(out_frame.data, frame.data, clamped_dlc);
 
                     ucdrBuffer ub;
                     ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
@@ -461,7 +465,7 @@ static void bridge_worker_task(void const *arg) {
                         } else {
                             g_consecutive_tx_errors++;
                             if (g_consecutive_tx_errors >= 5) {
-                                printf("[Zenoh-TX] Send failure detected! Fast-tripping reconnect...\r\n");
+                                LOGW("zenoh", "Send failure detected! Fast-tripping reconnect...");
                                 g_bridge.zenoh_ready = false;
                             }
                         }
@@ -470,8 +474,8 @@ static void bridge_worker_task(void const *arg) {
                         timed.id = frame.id;
                         timed.is_rtr = frame.is_rtr;
                         timed.is_extended = frame.is_extended;
-                        timed.dlc = frame.dlc;
-                        memcpy(timed.data, frame.data, timed.dlc);
+                        timed.dlc = clamped_dlc;
+                        memcpy(timed.data, frame.data, clamped_dlc);
                         timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
                         timed.timestamp_valid = false;
                         ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
@@ -576,7 +580,8 @@ static void teardown_zenoh_session(void) {
     if (!g_bridge.zenoh_ready && !z_internal_check(g_bridge.session)) {
         return;
     }
-    printf("[Zenoh] Tearing down session for clean reconnect...\r\n");
+    LOGI("zenoh", "Tearing down session for clean reconnect... (Free heap: %u bytes)",
+         (unsigned)xPortGetFreeHeapSize());
     g_bridge.zenoh_ready = false;
     osDelay(50);
 
@@ -601,7 +606,8 @@ static void teardown_zenoh_session(void) {
         z_drop(z_move(g_bridge.session));
     }
 
-    printf("[Zenoh] Session destroyed. Ready for fresh reconnection.\r\n");
+    LOGI("zenoh", "Session destroyed. Ready for fresh reconnection (Free heap: %u bytes)",
+         (unsigned)xPortGetFreeHeapSize());
 }
 
 static bool init_ros2_entities(void) {
@@ -675,15 +681,16 @@ static void zenoh_engine_task(void const *arg) {
     for (;;) {
         /* 1. Physical Ethernet link check */
         while (!netif_is_link_up(&gnetif)) {
+            health_kick();
             HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-            printf("[ETH] Physical link DOWN. Waiting for cable...\r\n");
+            LOGW("eth", "Physical link DOWN. Waiting for cable...");
             osDelay(500);
         }
 
         /* 2. Open Zenoh session with persistent retry (500ms intervals) */
+        health_kick();
         reconnect_attempts++;
-        printf("[Zenoh] [%lu] Connecting to router (%s)...\r\n",
-               (unsigned long)reconnect_attempts, g_zenoh_locators[0]);
+        LOGI("zenoh", "[%lu] Connecting to router...", (unsigned long)reconnect_attempts);
 
         z_owned_config_t config;
         configure_zenoh_session(&config);
@@ -692,7 +699,7 @@ static void zenoh_engine_task(void const *arg) {
         if (res < 0) {
             HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
             if (reconnect_attempts % 6 == 1) {
-                printf("[Zenoh] Connect failed (%d). Retrying aggressively every 500ms...\r\n", (int)res);
+                LOGW("zenoh", "Connect failed (%d). Retrying persistently...", (int)res);
             }
             osDelay(500);
             continue;
@@ -724,9 +731,19 @@ static void zenoh_engine_task(void const *arg) {
         while (g_bridge.zenoh_ready) {
             osDelay(500);
 
+            /* Watchdog: Feed hardware IWDG only if worker task is responsive */
+            uint32_t now = HAL_GetTick();
+            if ((now - g_bridge_worker_heartbeat) < 3000) {
+                health_kick();
+            } else {
+                LOGE("watchdog", "Bridge worker task stalled! (heartbeat age: %lu ms)",
+                     (unsigned long)(now - g_bridge_worker_heartbeat));
+                /* Let IWDG reset MCU cleanly if worker is dead */
+            }
+
             /* Check A: Physical Ethernet Link */
             if (!netif_is_link_up(&gnetif)) {
-                printf("[Zenoh-MON] Ethernet physical link lost!\r\n");
+                LOGW("zenoh", "Ethernet physical link lost!");
                 break;
             }
 
@@ -750,11 +767,11 @@ static void zenoh_engine_task(void const *arg) {
 
             /* Check E: Router Peer Link State */
             if (!_z_session_has_router_peer(_Z_RC_IN_VAL(z_loan(g_bridge.session)))) {
-                printf("[Zenoh-MON] Router peer dropped/expired!\r\n");
+                LOGW("zenoh", "Router peer dropped/expired!");
                 break;
             }
 
-            uint32_t now = HAL_GetTick();
+            now = HAL_GetTick();
 
             /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
             if (now - last_stats_tick >= CONFIG_CAN_STATS_PERIOD_MS) {
@@ -803,22 +820,26 @@ static void zenoh_engine_task(void const *arg) {
 
 static void network_start_task(void const *arg) {
     (void)arg;
+
+    /* Start CAN hardware immediately so local bus functions even if Ethernet cable is unplugged */
+    can_hardware_init();
+
+    osThreadDef(bridgeTask, bridge_worker_task, osPriorityAboveNormal, 0, CONFIG_STACK_BRIDGE_TASK);
+    osThreadCreate(osThread(bridgeTask), NULL);
+
     bool error_led = false;
     while (!wait_for_network()) {
+        health_kick();
         error_led = !error_led;
         HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin,
                           error_led ? GPIO_PIN_SET : GPIO_PIN_RESET);
-        printf("[ETH-ERROR] Ethernet link unavailable; retrying indefinitely.\r\n");
+        LOGW("eth", "Ethernet link unavailable; retrying indefinitely...");
         osDelay(1000);
     }
     HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
-    can_hardware_init();
-
     osThreadDef(zenohTask, zenoh_engine_task, osPriorityNormal, 0, CONFIG_STACK_ZENOH_TASK);
     osThreadCreate(osThread(zenohTask), NULL);
-    osThreadDef(bridgeTask, bridge_worker_task, osPriorityAboveNormal, 0, CONFIG_STACK_BRIDGE_TASK);
-    osThreadCreate(osThread(bridgeTask), NULL);
     vTaskDelete(NULL);
 }
 
