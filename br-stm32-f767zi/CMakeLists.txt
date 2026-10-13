@@ -50,6 +50,8 @@ if(TRANSPORT_MSG_FILES)
             --package can_transport_msgs --msg ${TRANSPORT_MSG_DIR}/TimedFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
         COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
             --package can_transport_msgs --msg ${TRANSPORT_MSG_DIR}/TimedFDFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package can_transport_msgs --msg ${TRANSPORT_MSG_DIR}/BridgeStatus.msg --out-dir ${TRANSPORT_GEN_DIR}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}/std_msgs
         COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
             --package std_msgs --msg ${CMAKE_CURRENT_SOURCE_DIR}/../std_msgs/msg/UInt32.msg --out-dir ${GEN_DIR}/std_msgs

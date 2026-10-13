@@ -30,7 +30,7 @@
 #include "app_log.h"
 #include "health.h"
 #include "bridge_core.h"
-#include "generated/std_msgs/UInt32.h"
+#include "generated/transport/BridgeStatus.h"
 
 extern struct netif gnetif;
 
@@ -80,7 +80,7 @@ typedef struct {
 
 static bridge_t g_bridge;
 static zenoh_ros2_pub_t g_timed_pub;
-static zenoh_ros2_pub_t g_heartbeat_pub;
+static zenoh_ros2_pub_t g_status_pub;
 static volatile uint32_t g_consecutive_tx_errors = 0;
 
 /* ───────────────────── CAN Hardware & Filter Setup ─────────────────── */
@@ -590,7 +590,7 @@ static void teardown_zenoh_session(void) {
     osDelay(50);
 
     zenoh_ros2_pub_destroy(&g_timed_pub);
-    zenoh_ros2_pub_destroy(&g_heartbeat_pub);
+    zenoh_ros2_pub_destroy(&g_status_pub);
 
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
@@ -625,9 +625,9 @@ static bool init_ros2_entities(void) {
     zenoh_ros2_pub_create(&g_timed_pub, &g_bridge.node, "can/timed_frames",
                           can_transport_msgs_TimedFrame_DDS_TYPE,
                           can_transport_msgs_TimedFrame_TYPE_HASH);
-    zenoh_ros2_pub_create(&g_heartbeat_pub, &g_bridge.node, CONFIG_ROS2_HEARTBEAT_TOPIC,
-                          std_msgs_UInt32_DDS_TYPE,
-                          std_msgs_UInt32_TYPE_HASH);
+    zenoh_ros2_pub_create(&g_status_pub, &g_bridge.node, CONFIG_ROS2_STATUS_TOPIC,
+                          can_transport_msgs_BridgeStatus_DDS_TYPE,
+                          can_transport_msgs_BridgeStatus_TYPE_HASH);
 
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
@@ -815,17 +815,36 @@ static void zenoh_engine_task(void const *arg) {
                        (unsigned long)g_bridge.drop_count);
             }
 
-            /* Publish ROS 2 Heartbeat (every CONFIG_ROS2_HEARTBEAT_MS) */
-            static uint32_t last_heartbeat_tick = 0;
-            static uint32_t heartbeat_seq = 0;
-            if (now - last_heartbeat_tick >= CONFIG_ROS2_HEARTBEAT_MS) {
-                last_heartbeat_tick = now;
-                std_msgs_UInt32 hb_msg = { .data = ++heartbeat_seq };
-                uint8_t hb_buf[32];
+            /* Publish Comprehensive Status & Heartbeat (every CONFIG_ROS2_STATUS_MS) */
+            static uint32_t last_status_tick = 0;
+            static uint32_t status_seq = 0;
+            if (now - last_status_tick >= CONFIG_ROS2_STATUS_MS) {
+                last_status_tick = now;
+
+                uint8_t can_state = boff ? BRIDGE_CAN_STATE_BUS_OFF :
+                                    pass ? BRIDGE_CAN_STATE_WARNING :
+                                    BRIDGE_CAN_STATE_OK;
+
+                uint8_t bridge_state = (boff) ? BRIDGE_STATE_FAULT :
+                                       (g_bridge.can_to_zenoh_count > 0 || g_bridge.zenoh_to_can_count > 0) ?
+                                       BRIDGE_STATE_ACTIVE : BRIDGE_STATE_STANDBY;
+
+                can_transport_msgs_BridgeStatus status_msg = {
+                    .sequence        = ++status_seq,
+                    .uptime_ms       = now,
+                    .state           = bridge_state,
+                    .can_state       = can_state,
+                    .can_rx_count    = g_bridge.raw_rx_frames,
+                    .can_tx_count    = g_bridge.raw_tx_frames,
+                    .drop_count      = g_bridge.drop_count,
+                    .free_heap_bytes = (uint16_t)xPortGetFreeHeapSize()
+                };
+
+                uint8_t status_buf[64];
                 ucdrBuffer ub;
-                ucdr_init_buffer(&ub, hb_buf, sizeof(hb_buf));
-                if (std_msgs_UInt32_serialize(&ub, &hb_msg)) {
-                    zenoh_ros2_pub_send(&g_heartbeat_pub, hb_buf, ucdr_buffer_length(&ub));
+                ucdr_init_buffer(&ub, status_buf, sizeof(status_buf));
+                if (can_transport_msgs_BridgeStatus_serialize(&ub, &status_msg)) {
+                    zenoh_ros2_pub_send(&g_status_pub, status_buf, ucdr_buffer_length(&ub));
                 }
             }
         }
