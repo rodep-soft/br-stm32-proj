@@ -38,15 +38,15 @@ jobs:
         run: |
           python3 tools/msg2cdr.py --package can_msgs --msg transport_msgs/msg/Frame.msg \
             --out-dir br-stm32-h5e4vkt6/Core/Inc/generated/transport
-          python3 tools/msg2cdr.py --package can_transport_msgs --msg transport_msgs/msg/FDFrame.msg \
+          python3 tools/msg2cdr.py --package robot_interfaces --msg transport_msgs/msg/FDFrame.msg \
             --out-dir br-stm32-h5e4vkt6/Core/Inc/generated/transport
           python3 tools/msg2cdr.py --package can_msgs --msg transport_msgs/msg/Frame.msg \
             --out-dir br-stm32-f767zi/Core/Inc/generated/transport
-          python3 tools/msg2cdr.py --package can_transport_msgs --msg transport_msgs/msg/FDFrame.msg \
+          python3 tools/msg2cdr.py --package robot_interfaces --msg transport_msgs/msg/FDFrame.msg \
             --out-dir br-stm32-f767zi/Core/Inc/generated/transport
-          python3 tools/msg2cdr.py --package can_transport_msgs --msg transport_msgs/msg/BridgeStatus.msg \
+          python3 tools/msg2cdr.py --package robot_interfaces --msg transport_msgs/msg/BridgeStatus.msg \
             --out-dir br-stm32-h5e4vkt6/Core/Inc/generated/transport
-          python3 tools/msg2cdr.py --package can_transport_msgs --msg transport_msgs/msg/BridgeStatus.msg \
+          python3 tools/msg2cdr.py --package robot_interfaces --msg transport_msgs/msg/BridgeStatus.msg \
             --out-dir br-stm32-f767zi/Core/Inc/generated/transport
           python3 tools/msg2cdr.py --package std_msgs --msg std_msgs/msg/UInt32.msg \
             --out-dir br-stm32-h5e4vkt6/Core/Inc/generated/std_msgs

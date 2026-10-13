@@ -106,8 +106,8 @@ typedef enum {
     BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
     BRIDGE_DIR_CAN_RECV,        /**< Standalone CAN Receiver: log to serial without PC/Zenoh */
     BRIDGE_DIR_CAN_ECHO = BRIDGE_DIR_CAN_RECV, /**< Alias for backward compatibility */
-    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< can_transport_msgs/Frame -> Direct CAN frame TX */
-    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> can_transport_msgs/Frame */
+    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< robot_interfaces/Frame -> Direct CAN frame TX */
+    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> robot_interfaces/Frame */
 } bridge_dir_t;
 
 typedef enum {
@@ -178,16 +178,16 @@ typedef struct {
 #define BRIDGE_ROS_TO_CAN_FD_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_ROS_TO_CAN_RAW, can_bus, BRIDGE_FRAME_FD, 0, \
                       BRIDGE_PAYLOAD_FD_FRAME, \
-                      sizeof(can_transport_msgs_FDFrame), can_transport_msgs_FDFrame, NULL, \
-                      (cdr_deserialize_fn_t)can_transport_msgs_FDFrame_deserialize, \
-                      (msg_print_fn_t)can_transport_msgs_FDFrame_print)
+                      sizeof(robot_interfaces_FDFrame), robot_interfaces_FDFrame, NULL, \
+                      (cdr_deserialize_fn_t)robot_interfaces_FDFrame_deserialize, \
+                      (msg_print_fn_t)robot_interfaces_FDFrame_print)
 
 #define BRIDGE_CAN_TO_ROS_FD_FRAME(topic, can_bus) \
     BRIDGE_TOPIC_INIT(topic, BRIDGE_DIR_CAN_TO_ROS_RAW, can_bus, BRIDGE_FRAME_FD, 0, \
                       BRIDGE_PAYLOAD_FD_FRAME, \
-                      sizeof(can_transport_msgs_FDFrame), can_transport_msgs_FDFrame, \
-                      (cdr_serialize_fn_t)can_transport_msgs_FDFrame_serialize, NULL, \
-                      (msg_print_fn_t)can_transport_msgs_FDFrame_print)
+                      sizeof(robot_interfaces_FDFrame), robot_interfaces_FDFrame, \
+                      (cdr_serialize_fn_t)robot_interfaces_FDFrame_serialize, NULL, \
+                      (msg_print_fn_t)robot_interfaces_FDFrame_print)
 
 /**
  * MASTER TOPIC TABLE: Add your sensors, actuators, and ping-pong devices here.

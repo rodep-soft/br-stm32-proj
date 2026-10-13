@@ -380,7 +380,7 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
         bool is_extended;
         bool is_rtr;
         if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
-            const can_transport_msgs_FDFrame *cf = (const can_transport_msgs_FDFrame *)msg_buffer;
+            const robot_interfaces_FDFrame *cf = (const robot_interfaces_FDFrame *)msg_buffer;
             id = cf->id;
             dlc = cf->len;
             data = cf->data;
@@ -455,14 +455,14 @@ static void bridge_worker_task(void *arg) {
                     bool serialized;
                     if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
                         uint8_t fd_len = frame.dlc > 64U ? 64U : frame.dlc;
-                        can_transport_msgs_FDFrame out_frame;
+                        robot_interfaces_FDFrame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
                         strncpy(out_frame.header.frame_id, "fdcan", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
                         out_frame.len = fd_len;
                         memcpy(out_frame.data, frame.data, fd_len);
-                        serialized = can_transport_msgs_FDFrame_serialize(&ub, &out_frame);
+                        serialized = robot_interfaces_FDFrame_serialize(&ub, &out_frame);
                     } else {
                         uint8_t classic_dlc = bridge_clamp_dlc(frame.dlc);
                         can_msgs_Frame out_frame;
@@ -488,7 +488,7 @@ static void bridge_worker_task(void *arg) {
                         ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                         if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
                             uint8_t fd_len = frame.dlc > 64U ? 64U : frame.dlc;
-                            can_transport_msgs_TimedFDFrame timed = {0};
+                            robot_interfaces_TimedFDFrame timed = {0};
                             strncpy(timed.header.frame_id, "fdcan", sizeof(timed.header.frame_id) - 1);
                             timed.id = frame.id;
                             timed.is_extended = frame.is_extended;
@@ -496,12 +496,12 @@ static void bridge_worker_task(void *arg) {
                             memcpy(timed.data, frame.data, fd_len);
                             timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
                             timed.timestamp_valid = false;
-                            if (can_transport_msgs_TimedFDFrame_serialize(&ub, &timed)) {
+                            if (robot_interfaces_TimedFDFrame_serialize(&ub, &timed)) {
                                 zenoh_ros2_pub_send(&g_timed_fd_pub, cdr_buf, ucdr_buffer_length(&ub));
                             }
                         } else {
                             uint8_t classic_dlc = bridge_clamp_dlc(frame.dlc);
-                            can_transport_msgs_TimedFrame timed = {0};
+                            robot_interfaces_TimedFrame timed = {0};
                             strncpy(timed.header.frame_id, "can", sizeof(timed.header.frame_id) - 1);
                             timed.id = frame.id;
                             timed.is_extended = frame.is_extended;
@@ -510,7 +510,7 @@ static void bridge_worker_task(void *arg) {
                             memcpy(timed.data, frame.data, classic_dlc);
                             timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
                             timed.timestamp_valid = false;
-                            if (can_transport_msgs_TimedFrame_serialize(&ub, &timed)) {
+                            if (robot_interfaces_TimedFrame_serialize(&ub, &timed)) {
                                 zenoh_ros2_pub_send(&g_timed_classic_pub, cdr_buf, ucdr_buffer_length(&ub));
                             }
                         }
@@ -647,14 +647,14 @@ static bool init_ros2_entities(void) {
     }
 
     zenoh_ros2_pub_create(&g_timed_classic_pub, &g_bridge.node, "can/timed_frames",
-                          can_transport_msgs_TimedFrame_DDS_TYPE,
-                          can_transport_msgs_TimedFrame_TYPE_HASH);
+                          robot_interfaces_TimedFrame_DDS_TYPE,
+                          robot_interfaces_TimedFrame_TYPE_HASH);
     zenoh_ros2_pub_create(&g_timed_fd_pub, &g_bridge.node, "canfd/timed_frames",
-                          can_transport_msgs_TimedFDFrame_DDS_TYPE,
-                          can_transport_msgs_TimedFDFrame_TYPE_HASH);
+                          robot_interfaces_TimedFDFrame_DDS_TYPE,
+                          robot_interfaces_TimedFDFrame_TYPE_HASH);
     zenoh_ros2_pub_create(&g_status_pub, &g_bridge.node, CONFIG_ROS2_STATUS_TOPIC,
-                          can_transport_msgs_BridgeStatus_DDS_TYPE,
-                          can_transport_msgs_BridgeStatus_TYPE_HASH);
+                          robot_interfaces_BridgeStatus_DDS_TYPE,
+                          robot_interfaces_BridgeStatus_TYPE_HASH);
 
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
@@ -846,7 +846,7 @@ static void zenoh_engine_task(void *arg) {
                                        (g_bridge.can_to_zenoh_count > 0 || g_bridge.zenoh_to_can_count > 0) ?
                                        BRIDGE_STATE_ACTIVE : BRIDGE_STATE_STANDBY;
 
-                can_transport_msgs_BridgeStatus status_msg = {
+                robot_interfaces_BridgeStatus status_msg = {
                     .sequence        = ++status_seq,
                     .uptime_ms       = now,
                     .state           = bridge_state,
@@ -860,7 +860,7 @@ static void zenoh_engine_task(void *arg) {
                 uint8_t status_buf[64];
                 ucdrBuffer ub;
                 ucdr_init_buffer(&ub, status_buf, sizeof(status_buf));
-                if (can_transport_msgs_BridgeStatus_serialize(&ub, &status_msg)) {
+                if (robot_interfaces_BridgeStatus_serialize(&ub, &status_msg)) {
                     zenoh_ros2_pub_send(&g_status_pub, status_buf, ucdr_buffer_length(&ub));
                 }
             }
