@@ -436,7 +436,9 @@ static void bridge_worker_task(void *arg) {
             osDelay(10);
             continue;
         }
-        if (xQueueReceive(g_rx_queue, &frame, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(g_rx_queue, &frame, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            continue;
+        }
 
         uint32_t now = HAL_GetTick();
 
