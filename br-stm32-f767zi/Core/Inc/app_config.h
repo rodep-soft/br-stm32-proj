@@ -97,8 +97,8 @@ typedef enum {
     BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
     BRIDGE_DIR_CAN_RECV,        /**< Standalone CAN Receiver: log to serial without PC/Zenoh */
     BRIDGE_DIR_CAN_ECHO = BRIDGE_DIR_CAN_RECV, /**< Alias for backward compatibility */
-    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< can_transport_msgs/Frame -> Direct CAN frame TX */
-    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> can_transport_msgs/Frame */
+    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< robot_interfaces/Frame -> Direct CAN frame TX */
+    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> robot_interfaces/Frame */
 } bridge_dir_t;
 
 typedef void (*msg_print_fn_t)(const void *topic);

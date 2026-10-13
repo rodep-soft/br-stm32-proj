@@ -1,4 +1,4 @@
-# package: can_transport_msgs
+# package: robot_interfaces
 std_msgs/Header header
 uint32 id
 bool is_extended

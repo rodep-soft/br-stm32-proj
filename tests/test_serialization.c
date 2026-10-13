@@ -127,7 +127,7 @@ static void test_std_msgs_uint32_roundtrip(void) {
 static void test_bridge_status_roundtrip(void) {
     printf("[TEST] Running test_bridge_status_roundtrip...\n");
 
-    can_transport_msgs_BridgeStatus original = {
+    robot_interfaces_BridgeStatus original = {
         .sequence        = 100,
         .uptime_ms       = 54321,
         .state           = BRIDGE_STATE_ACTIVE,
@@ -142,13 +142,13 @@ static void test_bridge_status_roundtrip(void) {
     ucdrBuffer writer;
     ucdr_init_buffer(&writer, buffer, sizeof(buffer));
 
-    assert(can_transport_msgs_BridgeStatus_serialize(&writer, &original) == true);
+    assert(robot_interfaces_BridgeStatus_serialize(&writer, &original) == true);
     size_t len = ucdr_buffer_length(&writer);
 
-    can_transport_msgs_BridgeStatus restored = {0};
+    robot_interfaces_BridgeStatus restored = {0};
     ucdrBuffer reader;
     ucdr_init_buffer(&reader, buffer, len);
-    assert(can_transport_msgs_BridgeStatus_deserialize(&reader, &restored) == true);
+    assert(robot_interfaces_BridgeStatus_deserialize(&reader, &restored) == true);
 
     assert(restored.sequence == original.sequence);
     assert(restored.uptime_ms == original.uptime_ms);

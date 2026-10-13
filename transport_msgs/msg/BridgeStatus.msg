@@ -1,4 +1,4 @@
-# can_transport_msgs/msg/BridgeStatus.msg
+# robot_interfaces/msg/BridgeStatus.msg
 # Bridge and MCU Health Status Message
 
 uint32 sequence         # Incrementing sequence number

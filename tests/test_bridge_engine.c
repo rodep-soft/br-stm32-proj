@@ -152,7 +152,7 @@ static void test_motor_command_roundtrip(void) {
 }
 
 /* ==============================================================================
- * Test 3: can_transport_msgs/Frame CDR Serialization
+ * Test 3: robot_interfaces/Frame CDR Serialization
  * ============================================================================== */
 static void test_transport_frame_roundtrip(void) {
     printf("[TEST] Running test_transport_frame_roundtrip...\n");
