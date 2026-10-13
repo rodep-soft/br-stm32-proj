@@ -30,6 +30,7 @@
 #include "app_log.h"
 #include "health.h"
 #include "bridge_core.h"
+#include "generated/std_msgs/UInt32.h"
 
 extern struct netif gnetif;
 
@@ -79,6 +80,7 @@ typedef struct {
 
 static bridge_t g_bridge;
 static zenoh_ros2_pub_t g_timed_pub;
+static zenoh_ros2_pub_t g_heartbeat_pub;
 static volatile uint32_t g_consecutive_tx_errors = 0;
 
 /* ───────────────────── CAN Hardware & Filter Setup ─────────────────── */
@@ -586,6 +588,7 @@ static void teardown_zenoh_session(void) {
     osDelay(50);
 
     zenoh_ros2_pub_destroy(&g_timed_pub);
+    zenoh_ros2_pub_destroy(&g_heartbeat_pub);
 
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
@@ -620,6 +623,9 @@ static bool init_ros2_entities(void) {
     zenoh_ros2_pub_create(&g_timed_pub, &g_bridge.node, "can/timed_frames",
                           can_transport_msgs_TimedFrame_DDS_TYPE,
                           can_transport_msgs_TimedFrame_TYPE_HASH);
+    zenoh_ros2_pub_create(&g_heartbeat_pub, &g_bridge.node, CONFIG_ROS2_HEARTBEAT_TOPIC,
+                          std_msgs_UInt32_DDS_TYPE,
+                          std_msgs_UInt32_TYPE_HASH);
 
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
@@ -805,6 +811,20 @@ static void zenoh_engine_task(void const *arg) {
                        (unsigned long)g_bridge.raw_rx_frames, (unsigned long)g_bridge.raw_tx_frames,
                        tec, rec, lec_names[lec], lec, boff ? " [BOFF]" : "", pass ? " [PASS]" : "",
                        (unsigned long)g_bridge.drop_count);
+            }
+
+            /* Publish ROS 2 Heartbeat (every CONFIG_ROS2_HEARTBEAT_MS) */
+            static uint32_t last_heartbeat_tick = 0;
+            static uint32_t heartbeat_seq = 0;
+            if (now - last_heartbeat_tick >= CONFIG_ROS2_HEARTBEAT_MS) {
+                last_heartbeat_tick = now;
+                std_msgs_UInt32 hb_msg = { .data = ++heartbeat_seq };
+                uint8_t hb_buf[32];
+                ucdrBuffer ub;
+                ucdr_init_buffer(&ub, hb_buf, sizeof(hb_buf));
+                if (std_msgs_UInt32_serialize(&ub, &hb_msg)) {
+                    zenoh_ros2_pub_send(&g_heartbeat_pub, hb_buf, ucdr_buffer_length(&ub));
+                }
             }
         }
 
