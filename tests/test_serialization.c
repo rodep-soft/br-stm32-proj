@@ -121,6 +121,47 @@ static void test_std_msgs_uint32_roundtrip(void) {
     printf("       test_std_msgs_uint32_roundtrip: PASSED ✅\n");
 }
 
+#include "bridge_core.h"
+#include "generated/transport/BridgeStatus.h"
+
+static void test_bridge_status_roundtrip(void) {
+    printf("[TEST] Running test_bridge_status_roundtrip...\n");
+
+    can_transport_msgs_BridgeStatus original = {
+        .sequence        = 100,
+        .uptime_ms       = 54321,
+        .state           = BRIDGE_STATE_ACTIVE,
+        .can_state       = BRIDGE_CAN_STATE_OK,
+        .can_rx_count    = 1234,
+        .can_tx_count    = 5678,
+        .drop_count      = 0,
+        .free_heap_bytes = 20480
+    };
+
+    uint8_t buffer[128];
+    ucdrBuffer writer;
+    ucdr_init_buffer(&writer, buffer, sizeof(buffer));
+
+    assert(can_transport_msgs_BridgeStatus_serialize(&writer, &original) == true);
+    size_t len = ucdr_buffer_length(&writer);
+
+    can_transport_msgs_BridgeStatus restored = {0};
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, buffer, len);
+    assert(can_transport_msgs_BridgeStatus_deserialize(&reader, &restored) == true);
+
+    assert(restored.sequence == original.sequence);
+    assert(restored.uptime_ms == original.uptime_ms);
+    assert(restored.state == original.state);
+    assert(restored.can_state == original.can_state);
+    assert(restored.can_rx_count == original.can_rx_count);
+    assert(restored.can_tx_count == original.can_tx_count);
+    assert(restored.drop_count == original.drop_count);
+    assert(restored.free_heap_bytes == original.free_heap_bytes);
+
+    printf("       test_bridge_status_roundtrip: PASSED ✅\n");
+}
+
 int main(void) {
     printf("========================================\n");
     printf("   Micro-CDR Serialization Unit Tests   \n");
@@ -130,6 +171,7 @@ int main(void) {
     test_buffer_overflow_protection();
     test_keyexpr_macro();
     test_std_msgs_uint32_roundtrip();
+    test_bridge_status_roundtrip();
 
     printf("========================================\n");
     printf("   ALL UNIT TESTS PASSED SUCCESSFULLY!  \n");

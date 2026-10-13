@@ -55,8 +55,8 @@ extern "C" {
 #define CONFIG_ROS2_NODE_NAME         "stm32_bridge"
 #define CONFIG_ROS2_NODE_NS           "/"
 #define CONFIG_ROS2_DOMAIN_ID         0
-#define CONFIG_ROS2_HEARTBEAT_TOPIC   "heartbeat" /**< Heartbeat topic published by STM32 */
-#define CONFIG_ROS2_HEARTBEAT_MS      1000        /**< Heartbeat publish period in ms (1 Hz) */
+#define CONFIG_ROS2_STATUS_TOPIC      "status"    /**< Comprehensive MCU & bridge status topic */
+#define CONFIG_ROS2_STATUS_MS         1000        /**< Status publish period in ms (1 Hz) */
 
 /* ==============================================================================
  * 3. CAN Bus Settings

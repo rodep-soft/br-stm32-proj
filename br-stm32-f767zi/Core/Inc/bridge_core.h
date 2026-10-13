@@ -17,6 +17,21 @@
 extern "C" {
 #endif
 
+/* ───────────────────────── Bridge Lifecycle States ─────────────────────── */
+
+typedef enum {
+    BRIDGE_STATE_BOOTING       = 0, /**< Initializing hardware / networking */
+    BRIDGE_STATE_STANDBY       = 1, /**< Connected to Zenoh/ROS2, waiting/idle */
+    BRIDGE_STATE_ACTIVE        = 2, /**< Actively communicating */
+    BRIDGE_STATE_FAULT         = 3  /**< Critical fault / watchdog warning */
+} bridge_lifecycle_state_t;
+
+typedef enum {
+    BRIDGE_CAN_STATE_OK        = 0, /**< CAN bus healthy */
+    BRIDGE_CAN_STATE_WARNING   = 1, /**< Error passive / elevated TEC/REC */
+    BRIDGE_CAN_STATE_BUS_OFF   = 2  /**< Bus-off recovery active */
+} bridge_can_health_state_t;
+
 /* ───────────────────────── CAN frame helpers ───────────────────────────── */
 
 /** Classic CAN carries at most 8 data bytes; bxCAN can report DLC up to 15. */
