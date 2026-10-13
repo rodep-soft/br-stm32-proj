@@ -24,6 +24,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include "app_log.h"
+#include "health.h"
 #include "app_zenoh.h"
 /* USER CODE END Includes */
 
@@ -69,8 +71,9 @@ void StartDefaultTask(void const * argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/* printf() sink: goes through the non-blocking log ring (never stalls the robot). */
 int __io_putchar(int ch) {
-    HAL_UART_Transmit(&huart3, (uint8_t *)&ch, 1, 0xFFFF);
+    app_log_putc(ch);
     return ch;
 }
 /* USER CODE END 0 */
@@ -95,6 +98,8 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
+  /* Reset-cause capture + independent watchdog as early as possible. */
+  health_early_init();
 
   /* USER CODE END Init */
 
@@ -109,8 +114,11 @@ int main(void)
   MX_GPIO_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
-  MX_CAN1_Init();
+  /* CAN1 is initialized by app_zenoh (with calculated prescaler & FIFO filters) */
+  // MX_CAN1_Init();
   /* USER CODE BEGIN 2 */
+  app_log_init();
+  health_log_boot_report();
 
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
@@ -470,6 +478,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  health_reset("Error_Handler (HAL error)");
   __disable_irq();
   while (1)
   {

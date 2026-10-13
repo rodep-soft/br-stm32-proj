@@ -98,6 +98,29 @@ static void test_keyexpr_macro(void) {
     printf("       test_keyexpr_macro: PASSED ✅\n");
 }
 
+#include "generated/std_msgs/UInt32.h"
+
+static void test_std_msgs_uint32_roundtrip(void) {
+    printf("[TEST] Running test_std_msgs_uint32_roundtrip...\n");
+
+    std_msgs_UInt32 original = { .data = 4294967295U };
+    uint8_t buffer[64];
+    ucdrBuffer writer;
+    ucdr_init_buffer(&writer, buffer, sizeof(buffer));
+
+    assert(std_msgs_UInt32_serialize(&writer, &original) == true);
+    size_t len = ucdr_buffer_length(&writer);
+    assert(len == 8); // 4 bytes CDR header + 4 bytes uint32
+
+    std_msgs_UInt32 restored = {0};
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, buffer, len);
+    assert(std_msgs_UInt32_deserialize(&reader, &restored) == true);
+    assert(restored.data == original.data);
+
+    printf("       test_std_msgs_uint32_roundtrip: PASSED ✅\n");
+}
+
 int main(void) {
     printf("========================================\n");
     printf("   Micro-CDR Serialization Unit Tests   \n");
@@ -106,6 +129,7 @@ int main(void) {
     test_motor_status_roundtrip();
     test_buffer_overflow_protection();
     test_keyexpr_macro();
+    test_std_msgs_uint32_roundtrip();
 
     printf("========================================\n");
     printf("   ALL UNIT TESTS PASSED SUCCESSFULLY!  \n");

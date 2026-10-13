@@ -70,6 +70,24 @@ void vApplicationGetIdleTaskMemory( StaticTask_t **ppxIdleTaskTCBBuffer, StackTy
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+#include "health.h"
+#include <string.h>
+
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    (void)xTask;
+    char msg[48] = "stack overflow: ";
+    if (pcTaskName) {
+        strncat(msg, pcTaskName, sizeof(msg) - strlen(msg) - 1);
+    }
+    health_reset(msg);
+}
+
+void vApplicationMallocFailedHook(void)
+{
+    health_reset("FreeRTOS pvPortMalloc failed (OOM)");
+}
+
 
 /* USER CODE END Application */
 

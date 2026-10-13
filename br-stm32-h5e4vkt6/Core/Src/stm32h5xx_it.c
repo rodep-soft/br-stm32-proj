@@ -85,7 +85,15 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  /* Pick the stack that was in use, hand it to the crash reporter. Must stay the
+   * very first statements: no prologue may touch SP before this. */
+  __asm volatile(
+      "tst lr, #4        \n"
+      "ite eq            \n"
+      "mrseq r0, msp     \n"
+      "mrsne r0, psp     \n"
+      "mov   r1, lr      \n"
+      "b     crash_report_from_fault \n");
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
