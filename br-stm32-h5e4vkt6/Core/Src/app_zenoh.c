@@ -805,15 +805,16 @@ static void zenoh_engine_task(void *arg) {
                 break;
             }
 
-            /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
             now = HAL_GetTick();
+
+            uint32_t err = HAL_FDCAN_GetError(&hfdcan1);
+            bool boff = false;
+            bool pass = (err & (HAL_FDCAN_ERROR_PROTOCOL_ARBT |
+                                HAL_FDCAN_ERROR_PROTOCOL_DATA)) != 0;
+
+            /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
             if (now - last_stats_tick >= CONFIG_CAN_STATS_PERIOD_MS) {
                 last_stats_tick = now;
-
-                uint32_t err = HAL_FDCAN_GetError(&hfdcan1);
-                bool boff = false;
-                bool pass = (err & (HAL_FDCAN_ERROR_PROTOCOL_ARBT |
-                                    HAL_FDCAN_ERROR_PROTOCOL_DATA)) != 0;
 
                 for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
                     const bridge_topic_t *t = &g_bridge_topics[i];

@@ -781,19 +781,19 @@ static void zenoh_engine_task(void const *arg) {
 
             now = HAL_GetTick();
 
+            uint32_t esr = CAN1->ESR;
+            uint8_t tec = (uint8_t)((esr >> 16) & 0xFF);
+            uint8_t rec = (uint8_t)((esr >> 24) & 0xFF);
+            uint8_t lec = (uint8_t)((esr >> 4) & 0x07);
+            static const char *const lec_names[] = {
+                "None", "Stuff", "Form", "Ack", "BitRec", "BitDom", "CRC", "SW"
+            };
+            bool boff = (esr & (1U << 2)) != 0;
+            bool pass = (esr & (1U << 1)) != 0;
+
             /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
             if (now - last_stats_tick >= CONFIG_CAN_STATS_PERIOD_MS) {
                 last_stats_tick = now;
-
-                uint32_t esr = CAN1->ESR;
-                uint8_t tec = (uint8_t)((esr >> 16) & 0xFF);
-                uint8_t rec = (uint8_t)((esr >> 24) & 0xFF);
-                uint8_t lec = (uint8_t)((esr >> 4) & 0x07);
-                static const char *const lec_names[] = {
-                    "None", "Stuff", "Form", "Ack", "BitRec", "BitDom", "CRC", "SW"
-                };
-                bool boff = (esr & (1U << 2)) != 0;
-                bool pass = (esr & (1U << 1)) != 0;
 
                 bool timeout_alert = false;
                 for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
