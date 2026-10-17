@@ -4,6 +4,3 @@
 [submodule "third_party/micro-cdr"]
 	path = third_party/micro-cdr
 	url = https://github.com/eProsima/Micro-CDR.git
-[submodule "third_party/abu2027-br-msgs"]
-	path = third_party/abu2027-br-msgs
-	url = https://github.com/rodep-soft/abu2027-br-msgs.git

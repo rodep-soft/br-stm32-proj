@@ -98,6 +98,70 @@ static void test_keyexpr_macro(void) {
     printf("       test_keyexpr_macro: PASSED ✅\n");
 }
 
+#include "generated/std_msgs/UInt32.h"
+
+static void test_std_msgs_uint32_roundtrip(void) {
+    printf("[TEST] Running test_std_msgs_uint32_roundtrip...\n");
+
+    std_msgs_UInt32 original = { .data = 4294967295U };
+    uint8_t buffer[64];
+    ucdrBuffer writer;
+    ucdr_init_buffer(&writer, buffer, sizeof(buffer));
+
+    assert(std_msgs_UInt32_serialize(&writer, &original) == true);
+    size_t len = ucdr_buffer_length(&writer);
+    assert(len == 8); // 4 bytes CDR header + 4 bytes uint32
+
+    std_msgs_UInt32 restored = {0};
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, buffer, len);
+    assert(std_msgs_UInt32_deserialize(&reader, &restored) == true);
+    assert(restored.data == original.data);
+
+    printf("       test_std_msgs_uint32_roundtrip: PASSED ✅\n");
+}
+
+#include "bridge_core.h"
+#include "generated/transport/BridgeStatus.h"
+
+static void test_bridge_status_roundtrip(void) {
+    printf("[TEST] Running test_bridge_status_roundtrip...\n");
+
+    robot_interfaces_BridgeStatus original = {
+        .sequence        = 100,
+        .uptime_ms       = 54321,
+        .state           = BRIDGE_STATE_ACTIVE,
+        .can_state       = BRIDGE_CAN_STATE_OK,
+        .can_rx_count    = 1234,
+        .can_tx_count    = 5678,
+        .drop_count      = 0,
+        .free_heap_bytes = 20480
+    };
+
+    uint8_t buffer[128];
+    ucdrBuffer writer;
+    ucdr_init_buffer(&writer, buffer, sizeof(buffer));
+
+    assert(robot_interfaces_BridgeStatus_serialize(&writer, &original) == true);
+    size_t len = ucdr_buffer_length(&writer);
+
+    robot_interfaces_BridgeStatus restored = {0};
+    ucdrBuffer reader;
+    ucdr_init_buffer(&reader, buffer, len);
+    assert(robot_interfaces_BridgeStatus_deserialize(&reader, &restored) == true);
+
+    assert(restored.sequence == original.sequence);
+    assert(restored.uptime_ms == original.uptime_ms);
+    assert(restored.state == original.state);
+    assert(restored.can_state == original.can_state);
+    assert(restored.can_rx_count == original.can_rx_count);
+    assert(restored.can_tx_count == original.can_tx_count);
+    assert(restored.drop_count == original.drop_count);
+    assert(restored.free_heap_bytes == original.free_heap_bytes);
+
+    printf("       test_bridge_status_roundtrip: PASSED ✅\n");
+}
+
 int main(void) {
     printf("========================================\n");
     printf("   Micro-CDR Serialization Unit Tests   \n");
@@ -106,6 +170,8 @@ int main(void) {
     test_motor_status_roundtrip();
     test_buffer_overflow_protection();
     test_keyexpr_macro();
+    test_std_msgs_uint32_roundtrip();
+    test_bridge_status_roundtrip();
 
     printf("========================================\n");
     printf("   ALL UNIT TESTS PASSED SUCCESSFULLY!  \n");

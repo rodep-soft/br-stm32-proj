@@ -27,8 +27,13 @@
 #include "lwip/prot/dhcp.h"
 
 #include <zenoh-pico.h>
+#include <zenoh-pico/net/session.h>
 #include "zenoh_ros2.h"
 #include "app_config.h"
+#include "app_log.h"
+#include "health.h"
+#include "bridge_core.h"
+#include "generated/transport/BridgeStatus.h"
 
 extern struct netif gnetif;
 
@@ -42,6 +47,7 @@ typedef struct {
     bool     is_fd;
     bridge_can_bus_t bus;
     uint8_t  data[64];
+    uint32_t rx_tick;
 } can_frame_t;
 
 static uint8_t can_fd_payload_length(uint32_t dlc_code)
@@ -76,7 +82,9 @@ static uint32_t can_fd_dlc_code(uint8_t length)
 static bool can_frame_matches_route(const can_frame_t *frame, const bridge_topic_t *topic)
 {
     const bool route_is_fd = topic->frame_mode == BRIDGE_FRAME_FD;
-    return frame->bus == topic->bus && frame->is_fd == route_is_fd;
+    const bool route_matches_bus =
+        topic->bus == BRIDGE_CAN_ANY || frame->bus == topic->bus;
+    return route_matches_bus && frame->is_fd == route_is_fd;
 }
 
 extern FDCAN_HandleTypeDef hfdcan1;
@@ -114,6 +122,10 @@ typedef struct {
 } bridge_t;
 
 static bridge_t g_bridge;
+static zenoh_ros2_pub_t g_timed_classic_pub;
+static zenoh_ros2_pub_t g_timed_fd_pub;
+static zenoh_ros2_pub_t g_status_pub;
+static volatile uint32_t g_consecutive_tx_errors = 0;
 
 /* ───────────────────── CAN Hardware & Filter Setup ─────────────────── */
 
@@ -264,6 +276,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
             frame.is_fd = (rx_hdr.FDFormat == FDCAN_FD_CAN);
             frame.dlc = can_fd_payload_length(rx_hdr.DataLength);
             frame.bus = (hfdcan->Instance == FDCAN2) ? BRIDGE_FDCAN2 : BRIDGE_FDCAN1;
+            frame.rx_tick = HAL_GetTick();
 
             if (xQueueSendFromISR(g_rx_queue, &frame, &higher_priority_task_woken) == pdTRUE) {
                 g_bridge.raw_rx_frames++;
@@ -280,7 +293,17 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t it_flags) {
 static const char *const g_zenoh_locators[] = { CONFIG_ZENOH_LOCATOR_LIST };
 #define ZENOH_LOCATOR_COUNT (sizeof(g_zenoh_locators) / sizeof(g_zenoh_locators[0]))
 
-static void wait_for_network(void) {
+static void configure_zenoh_session(z_owned_config_t *config) {
+    z_config_default(config);
+    zp_config_insert(z_loan_mut(*config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
+    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
+        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
+            zp_config_insert(z_loan_mut(*config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
+        }
+    }
+}
+
+static bool wait_for_network(void) {
 #if (CONFIG_NET_USE_DHCP == 0)
     /* Instant static IP mode (< 1s boot) */
     printf("[ETH] Instant Static IP: %s\r\n", CONFIG_NET_STATIC_IP);
@@ -292,16 +315,23 @@ static void wait_for_network(void) {
     netif_set_up(&gnetif);
 
     uint32_t wait_count = 0;
-    while (!netif_is_link_up(&gnetif)) {
+    const uint32_t timeout_ticks = CONFIG_NET_LINK_TIMEOUT_SEC * 10U;
+    while (!netif_is_link_up(&gnetif) && wait_count < timeout_ticks) {
+        health_kick();
         if (wait_count++ % 30 == 0) {
-            printf("[ETH] Waiting for Ethernet cable link (plug in cable to connect Zenoh)...\r\n");
+            LOGI("eth", "Waiting for Ethernet cable link...");
         }
         osDelay(100);
+    }
+    if (!netif_is_link_up(&gnetif)) {
+        LOGW("eth", "Link timeout; CAN remains active, retrying Ethernet later.");
+        return false;
     }
 #else
     printf("[ETH] Waiting for DHCP lease...\r\n");
     int sec = 0;
-    while (netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) {
+    while ((netif_is_up(&gnetif) == 0 || gnetif.ip_addr.addr == 0) &&
+           sec < CONFIG_NET_DHCP_TIMEOUT_SEC) {
         osDelay(1000);
         if (netif_is_link_up(&gnetif) && netif_dhcp_data(&gnetif) == NULL) {
             dhcp_start(&gnetif);
@@ -318,8 +348,12 @@ static void wait_for_network(void) {
             break;
         }
     }
+    if (gnetif.ip_addr.addr == 0) {
+        return false;
+    }
 #endif
     printf("[ETH] Link UP! IP: %s\r\n", ip4addr_ntoa(&gnetif.ip_addr));
+    return true;
 }
 
 /* ─────────── ROS 2 -> CAN: Direct Zero-Latency Callback ────────────── */
@@ -346,12 +380,12 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
         bool is_extended;
         bool is_rtr;
         if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
-            const can_msgs_FDFrame *cf = (const can_msgs_FDFrame *)msg_buffer;
+            const robot_interfaces_FDFrame *cf = (const robot_interfaces_FDFrame *)msg_buffer;
             id = cf->id;
-            dlc = cf->dlc;
+            dlc = cf->len;
             data = cf->data;
             is_extended = cf->is_extended;
-            is_rtr = cf->is_rtr;
+            is_rtr = false;
         } else {
             const can_msgs_Frame *cf = (const can_msgs_Frame *)msg_buffer;
             id = cf->id;
@@ -387,28 +421,26 @@ static void on_zenoh_sub_message(const uint8_t *payload, size_t len, void *ctx) 
 
 /* ─────────── CAN -> ROS 2: Reassembly Worker Task ──────────────────── */
 
+static volatile uint32_t g_bridge_worker_heartbeat = 0;
+
 static void bridge_worker_task(void *arg) {
     (void)arg;
-    printf("[Bridge] CAN worker running (DTCM-RAM)\r\n");
+    LOGI("bridge", "CAN worker running (DTCM-RAM)");
 
     can_frame_t frame;
     uint8_t cdr_buf[256];
 
     for (;;) {
+        g_bridge_worker_heartbeat = HAL_GetTick();
         if (g_rx_queue == NULL) {
             osDelay(10);
             continue;
         }
-        if (xQueueReceive(g_rx_queue, &frame, portMAX_DELAY) != pdTRUE) continue;
+        if (xQueueReceive(g_rx_queue, &frame, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            continue;
+        }
 
         uint32_t now = HAL_GetTick();
-
-        if (frame.id != 0x400) {
-            printf("[RAW-RX] id=0x%08lX ext=%d dlc=%d data=%02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-                   (unsigned long)frame.id, frame.is_extended, frame.dlc,
-                   frame.data[0], frame.data[1], frame.data[2], frame.data[3],
-                   frame.data[4], frame.data[5], frame.data[6], frame.data[7]);
-        }
 
         /* 1. Raw Transparent CAN Frame Forwarding -> ROS 2 (/from_can_bus) */
         if (g_bridge.zenoh_ready) {
@@ -422,32 +454,66 @@ static void bridge_worker_task(void *arg) {
                     ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                     bool serialized;
                     if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
-                        can_msgs_FDFrame out_frame;
+                        uint8_t fd_len = frame.dlc > 64U ? 64U : frame.dlc;
+                        robot_interfaces_FDFrame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
-                        out_frame.header.sec = (int32_t)(now / 1000);
-                        out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
                         strncpy(out_frame.header.frame_id, "fdcan", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
-                        out_frame.is_rtr = frame.is_rtr;
-                        out_frame.dlc = frame.dlc;
-                        memcpy(out_frame.data, frame.data, frame.dlc);
-                        serialized = can_msgs_FDFrame_serialize(&ub, &out_frame);
+                        out_frame.len = fd_len;
+                        memcpy(out_frame.data, frame.data, fd_len);
+                        serialized = robot_interfaces_FDFrame_serialize(&ub, &out_frame);
                     } else {
+                        uint8_t classic_dlc = bridge_clamp_dlc(frame.dlc);
                         can_msgs_Frame out_frame;
                         memset(&out_frame, 0, sizeof(out_frame));
-                        out_frame.header.sec = (int32_t)(now / 1000);
-                        out_frame.header.nanosec = (uint32_t)((now % 1000) * 1000000);
                         strncpy(out_frame.header.frame_id, "can", sizeof(out_frame.header.frame_id) - 1);
                         out_frame.id = frame.id;
                         out_frame.is_extended = frame.is_extended;
                         out_frame.is_rtr = frame.is_rtr;
-                        out_frame.dlc = frame.dlc > 8U ? 8U : frame.dlc;
-                        memcpy(out_frame.data, frame.data, out_frame.dlc);
+                        out_frame.dlc = classic_dlc;
+                        memcpy(out_frame.data, frame.data, classic_dlc);
                         serialized = can_msgs_Frame_serialize(&ub, &out_frame);
                     }
                     if (serialized) {
-                        zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
+                        if (zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub))) {
+                            g_consecutive_tx_errors = 0;
+                        } else {
+                            g_consecutive_tx_errors++;
+                            if (g_consecutive_tx_errors >= 5) {
+                                LOGW("zenoh", "Send failure detected! Fast-tripping reconnect...");
+                                g_bridge.zenoh_ready = false;
+                            }
+                        }
+                        ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
+                        if (t->payload_kind == BRIDGE_PAYLOAD_FD_FRAME) {
+                            uint8_t fd_len = frame.dlc > 64U ? 64U : frame.dlc;
+                            robot_interfaces_TimedFDFrame timed = {0};
+                            strncpy(timed.header.frame_id, "fdcan", sizeof(timed.header.frame_id) - 1);
+                            timed.id = frame.id;
+                            timed.is_extended = frame.is_extended;
+                            timed.len = fd_len;
+                            memcpy(timed.data, frame.data, fd_len);
+                            timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
+                            timed.timestamp_valid = false;
+                            if (robot_interfaces_TimedFDFrame_serialize(&ub, &timed)) {
+                                zenoh_ros2_pub_send(&g_timed_fd_pub, cdr_buf, ucdr_buffer_length(&ub));
+                            }
+                        } else {
+                            uint8_t classic_dlc = bridge_clamp_dlc(frame.dlc);
+                            robot_interfaces_TimedFrame timed = {0};
+                            strncpy(timed.header.frame_id, "can", sizeof(timed.header.frame_id) - 1);
+                            timed.id = frame.id;
+                            timed.is_extended = frame.is_extended;
+                            timed.is_error = false;
+                            timed.dlc = classic_dlc;
+                            memcpy(timed.data, frame.data, classic_dlc);
+                            timed.rx_monotonic_ns = (uint64_t)frame.rx_tick * 1000000ULL;
+                            timed.timestamp_valid = false;
+                            if (robot_interfaces_TimedFrame_serialize(&ub, &timed)) {
+                                zenoh_ros2_pub_send(&g_timed_classic_pub, cdr_buf, ucdr_buffer_length(&ub));
+                            }
+                        }
                         g_bridge.can_to_zenoh_count++;
                     }
                 }
@@ -508,17 +574,25 @@ static void bridge_worker_task(void *arg) {
                         ucdrBuffer ub;
                         ucdr_init_buffer(&ub, cdr_buf, sizeof(cdr_buf));
                         if (t->serialize_fn(&ub, rt->buffer)) {
-                            zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub));
-                            g_bridge.can_to_zenoh_count++;
+                            if (zenoh_ros2_pub_send(&rt->pub, cdr_buf, ucdr_buffer_length(&ub))) {
+                                g_consecutive_tx_errors = 0;
+                                g_bridge.can_to_zenoh_count++;
 
-                            static uint32_t last_tx_print = 0;
-                            if (now - last_tx_print >= 1000) {
-                                last_tx_print = now;
-                                printf("[ROS-TX] /%s: ", t->topic_name);
-                                if (t->print_fn != NULL) {
-                                    t->print_fn(rt->buffer);
-                                } else {
-                                    printf("(%zu bytes)\r\n", t->msg_size);
+                                static uint32_t last_tx_print = 0;
+                                if (now - last_tx_print >= 1000) {
+                                    last_tx_print = now;
+                                    printf("[ROS-TX] /%s: ", t->topic_name);
+                                    if (t->print_fn != NULL) {
+                                        t->print_fn(rt->buffer);
+                                    } else {
+                                        printf("(%zu bytes)\r\n", t->msg_size);
+                                    }
+                                }
+                            } else {
+                                g_consecutive_tx_errors++;
+                                if (g_consecutive_tx_errors >= 5) {
+                                    printf("[Zenoh-TX] Send failure detected! Fast-tripping reconnect...\r\n");
+                                    g_bridge.zenoh_ready = false;
                                 }
                             }
                         }
@@ -530,51 +604,62 @@ static void bridge_worker_task(void *arg) {
     }
 }
 
-/* ───────────────────── Main Zenoh Engine Task ──────────────────────── */
+/* ───────────────────── Session Reconnection & Teardown ───────────────── */
 
-static void zenoh_engine_task(void *arg) {
-    (void)arg;
+static void teardown_zenoh_session(void) {
+    LOGI("zenoh", "Tearing down session for clean reconnect... (Free heap: %u bytes)",
+         (unsigned)xPortGetFreeHeapSize());
+    g_bridge.zenoh_ready = false;
+    osDelay(50);
 
-    printf("\r\n==================================================\r\n");
-    printf("  STM32H5 Ultra-Thin Zenoh-CAN Bridge             \r\n");
-    printf("==================================================\r\n");
+    zenoh_ros2_pub_destroy(&g_timed_classic_pub);
+    zenoh_ros2_pub_destroy(&g_timed_fd_pub);
+    zenoh_ros2_pub_destroy(&g_status_pub);
 
-    wait_for_network();
-
-    /* Open Zenoh session */
-    z_owned_config_t config;
-    z_config_default(&config);
-    zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
-    for (size_t i = 0; i < ZENOH_LOCATOR_COUNT; i++) {
-        if (g_zenoh_locators[i] != NULL && strlen(g_zenoh_locators[i]) > 0) {
-            zp_config_insert(z_loan_mut(config), Z_CONFIG_CONNECT_KEY, g_zenoh_locators[i]);
+    for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+        const bridge_topic_t *t = &g_bridge_topics[i];
+        topic_runtime_t *rt = &g_runtimes[i];
+        if (t->dir == BRIDGE_DIR_CAN_TO_ROS || t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
+            zenoh_ros2_pub_destroy(&rt->pub);
+        } else if (t->dir == BRIDGE_DIR_ROS_TO_CAN || t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
+            zenoh_ros2_sub_destroy(&rt->sub);
         }
     }
 
-    z_result_t res;
-    while ((res = z_open(&g_bridge.session, z_move(config), NULL)) < 0) {
-        printf("[Zenoh] Connect failed (%d). Retry in 2s...\r\n", (int)res);
-        osDelay(2000);
-        z_config_default(&config);
-        zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, CONFIG_ZENOH_MODE);
-    }
-    printf("[Zenoh] Connected to router!\r\n");
+    zenoh_ros2_node_fini(&g_bridge.node);
 
-    /* Init ROS 2 Node */
+    if (z_internal_check(g_bridge.session)) {
+        zp_stop_read_task(z_loan_mut(g_bridge.session));
+        zp_stop_lease_task(z_loan_mut(g_bridge.session));
+        z_close(z_loan_mut(g_bridge.session), NULL);
+        z_drop(z_move(g_bridge.session));
+    }
+
+    LOGI("zenoh", "Session destroyed. Ready for fresh reconnection (Free heap: %u bytes)",
+         (unsigned)xPortGetFreeHeapSize());
+}
+
+static bool init_ros2_entities(void) {
     if (!zenoh_ros2_node_init(&g_bridge.node, &g_bridge.session,
                               CONFIG_ROS2_NODE_NAME, CONFIG_ROS2_NODE_NS, CONFIG_ROS2_DOMAIN_ID)) {
         printf("[ROS2] Node init failed!\r\n");
-        return;
+        return false;
     }
 
-    /* Auto-register topics from declarative master table */
+    zenoh_ros2_pub_create(&g_timed_classic_pub, &g_bridge.node, "can/timed_frames",
+                          robot_interfaces_TimedFrame_DDS_TYPE,
+                          robot_interfaces_TimedFrame_TYPE_HASH);
+    zenoh_ros2_pub_create(&g_timed_fd_pub, &g_bridge.node, "canfd/timed_frames",
+                          robot_interfaces_TimedFDFrame_DDS_TYPE,
+                          robot_interfaces_TimedFDFrame_TYPE_HASH);
+    zenoh_ros2_pub_create(&g_status_pub, &g_bridge.node, CONFIG_ROS2_STATUS_TOPIC,
+                          robot_interfaces_BridgeStatus_DDS_TYPE,
+                          robot_interfaces_BridgeStatus_TYPE_HASH);
+
     printf("[Bridge] Free heap before topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
     for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
         const bridge_topic_t *t = &g_bridge_topics[i];
         topic_runtime_t *rt = &g_runtimes[i];
-
-        printf("[Bridge] Registering [%u] %s (heap: %u)\r\n",
-               (unsigned)i, t->topic_name, (unsigned)xPortGetFreeHeapSize());
 
         if (t->dir == BRIDGE_DIR_CAN_RECV) {
             printf("  [RECV] %-16s : CAN 0x%03lX (Standalone Receiver)\r\n",
@@ -594,74 +679,228 @@ static void zenoh_engine_task(void *arg) {
                    t->topic_name, (unsigned long)t->can_base_id,
                    (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames,
                    ok ? "OK" : "FAIL");
+            if (!ok) return false;
         } else if (t->dir == BRIDGE_DIR_CAN_TO_ROS_RAW) {
             bool ok = zenoh_ros2_pub_create(&rt->pub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash);
             printf("  [PUB] /%-16s -> Raw CAN Frame Bridge [%s]\r\n", t->topic_name, ok ? "OK" : "FAIL");
+            if (!ok) return false;
         } else if (t->dir == BRIDGE_DIR_ROS_TO_CAN_RAW) {
             bool ok = zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
-                                  on_zenoh_sub_message, (void *)i);
+                                            on_zenoh_sub_message, (void *)i);
             printf("  [SUB] /%-16s <- Raw CAN Frame Bridge [%s]\r\n", t->topic_name, ok ? "OK" : "FAIL");
+            if (!ok) return false;
         } else {
             bool ok = zenoh_ros2_sub_create(&rt->sub, &g_bridge.node, t->topic_name, t->dds_type, t->type_hash,
-                                  on_zenoh_sub_message, (void *)i);
+                                            on_zenoh_sub_message, (void *)i);
             printf("  [SUB] /%-16s <- CAN 0x%03lX..0x%03lX (%u frames) [%s]\r\n",
                    t->topic_name, (unsigned long)t->can_base_id,
                    (unsigned long)(t->can_base_id + rt->num_frames - 1), rt->num_frames,
                    ok ? "OK" : "FAIL");
+            if (!ok) return false;
         }
     }
     printf("[Bridge] Free heap after topic init: %u bytes\r\n", (unsigned)xPortGetFreeHeapSize());
+    return true;
+}
 
-    zp_start_read_task(z_loan_mut(g_bridge.session), NULL);
-    zp_start_lease_task(z_loan_mut(g_bridge.session), NULL);
+/* ───────────────────── Main Zenoh Engine Task ──────────────────────── */
 
-    g_bridge.zenoh_ready = true;
-    printf("[Bridge] Active! 2-Task Ultra-Thin Engine Running.\r\n");
+static void zenoh_engine_task(void *arg) {
+    (void)arg;
 
-    /* Embedded Diagnostics & Watchdog Loop (replaces separate stats task) */
+    printf("\r\n==================================================\r\n");
+    printf("  STM32H5 Ultra-Thin Zenoh-CAN Bridge             \r\n");
+    printf("  Auto-Reconnect: AGGRESSIVE PERSISTENT MODE     \r\n");
+    printf("==================================================\r\n");
+
+    uint32_t reconnect_attempts = 0;
+
     for (;;) {
-        osDelay(CONFIG_CAN_STATS_PERIOD_MS);
+        /* 1. Physical Ethernet link check */
+        while (!netif_is_link_up(&gnetif)) {
+            health_kick();
+            LOGW("eth", "Physical link DOWN. Waiting for cable...");
+            osDelay(500);
+        }
 
-        uint32_t err = HAL_FDCAN_GetError(&hfdcan1);
-        bool boff = false;
-        bool pass = (err & (HAL_FDCAN_ERROR_PROTOCOL_ARBT |
-                            HAL_FDCAN_ERROR_PROTOCOL_DATA)) != 0;
+        /* 2. Open Zenoh session with persistent retry (500ms intervals) */
+        health_kick();
+        reconnect_attempts++;
+        LOGI("zenoh", "[%lu] Connecting to router...", (unsigned long)reconnect_attempts);
 
-        uint32_t now = HAL_GetTick();
-        for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
-            const bridge_topic_t *t = &g_bridge_topics[i];
-            if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
-            topic_runtime_t *rt = &g_runtimes[i];
-            if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_MS) {
-                printf("[WATCHDOG] /%s timeout!\r\n", t->topic_name);
+        z_owned_config_t config;
+        configure_zenoh_session(&config);
+
+        z_result_t res = z_open(&g_bridge.session, z_move(config), NULL);
+        if (res < 0) {
+            if (reconnect_attempts % 6 == 1) {
+                LOGW("zenoh", "Connect failed (%d). Retrying persistently...", (int)res);
+            }
+            osDelay(500);
+            continue;
+        }
+
+        LOGI("zenoh", "Connected to router! Initializing ROS 2 entities...");
+
+        /* 3. Initialize ROS 2 entities */
+        if (!init_ros2_entities()) {
+            LOGW("ros2", "Entity declaration failed! Cleaning up and retrying...");
+            teardown_zenoh_session();
+            osDelay(500);
+            continue;
+        }
+
+        /* 4. Start Zenoh Background Tasks */
+        zp_start_read_task(z_loan_mut(g_bridge.session), NULL);
+        zp_start_lease_task(z_loan_mut(g_bridge.session), NULL);
+
+        g_bridge.zenoh_ready = true;
+        g_consecutive_tx_errors = 0;
+        reconnect_attempts = 0;
+        LOGI("bridge", "ACTIVE & ONLINE! Connected to Zenoh & ROS 2.");
+
+        /* 5. Health Monitoring & Watchdog Loop */
+        uint32_t last_stats_tick = 0;
+
+        while (g_bridge.zenoh_ready) {
+            osDelay(500);
+
+            /* Watchdog: Feed hardware IWDG only if worker task is responsive */
+            uint32_t now = HAL_GetTick();
+            if ((now - g_bridge_worker_heartbeat) < 3000) {
+                health_kick();
+            } else {
+                LOGE("watchdog", "Bridge worker task stalled! (heartbeat age: %lu ms)",
+                     (unsigned long)(now - g_bridge_worker_heartbeat));
+                /* Let IWDG reset MCU cleanly if worker is dead */
+            }
+
+            /* Check A: Physical Ethernet Link */
+            if (!netif_is_link_up(&gnetif)) {
+                LOGW("zenoh", "Ethernet physical link lost!");
+                break;
+            }
+
+            /* Check B: Session Closed */
+            if (z_session_is_closed(z_loan(g_bridge.session))) {
+                LOGW("zenoh", "Zenoh session was closed!");
+                break;
+            }
+
+            /* Check C: Background Read Task Health */
+            if (!zp_read_task_is_running(z_loan(g_bridge.session))) {
+                LOGW("zenoh", "Zenoh background read task exited!");
+                break;
+            }
+
+            /* Check D: Background Lease Task Health */
+            if (!zp_lease_task_is_running(z_loan(g_bridge.session))) {
+                LOGW("zenoh", "Zenoh lease task exited!");
+                break;
+            }
+
+            /* Check E: Router Peer Link State */
+            if (!_z_session_has_router_peer(_Z_RC_IN_VAL(z_loan(g_bridge.session)))) {
+                LOGW("zenoh", "Router peer dropped/expired!");
+                break;
+            }
+
+            now = HAL_GetTick();
+
+            uint32_t err = HAL_FDCAN_GetError(&hfdcan1);
+            bool boff = false;
+            bool pass = (err & (HAL_FDCAN_ERROR_PROTOCOL_ARBT |
+                                HAL_FDCAN_ERROR_PROTOCOL_DATA)) != 0;
+
+            /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
+            if (now - last_stats_tick >= CONFIG_CAN_STATS_PERIOD_MS) {
+                last_stats_tick = now;
+
+                for (size_t i = 0; i < BRIDGE_TOPIC_COUNT; i++) {
+                    const bridge_topic_t *t = &g_bridge_topics[i];
+                    if (t->dir != BRIDGE_DIR_CAN_TO_ROS) continue;
+                    topic_runtime_t *rt = &g_runtimes[i];
+                    if (rt->rx_msg_count > 0 && (now - rt->last_recv_tick) > CONFIG_CAN_WATCHDOG_MS) {
+                        LOGW("watchdog", "/%s timeout!", t->topic_name);
+                    }
+                }
+
+                LOGI("stats", "CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | FDCAN_ERR:0x%08lX%s%s | DROP:%lu",
+                     (unsigned long)g_bridge.can_to_zenoh_count, (unsigned long)g_bridge.zenoh_to_can_count,
+                     (unsigned long)g_bridge.raw_rx_frames, (unsigned long)g_bridge.raw_tx_frames,
+                     (unsigned long)err, boff ? " [BOFF]" : "", pass ? " [PROTO]" : "",
+                     (unsigned long)g_bridge.drop_count);
+            }
+
+            /* Publish Comprehensive Status & Heartbeat (every CONFIG_ROS2_STATUS_MS) */
+            static uint32_t last_status_tick = 0;
+            static uint32_t status_seq = 0;
+            if (now - last_status_tick >= CONFIG_ROS2_STATUS_MS) {
+                last_status_tick = now;
+
+                uint8_t can_state = boff ? BRIDGE_CAN_STATE_BUS_OFF :
+                                    pass ? BRIDGE_CAN_STATE_WARNING :
+                                    BRIDGE_CAN_STATE_OK;
+
+                uint8_t bridge_state = (boff) ? BRIDGE_STATE_FAULT :
+                                       (g_bridge.can_to_zenoh_count > 0 || g_bridge.zenoh_to_can_count > 0) ?
+                                       BRIDGE_STATE_ACTIVE : BRIDGE_STATE_STANDBY;
+
+                robot_interfaces_BridgeStatus status_msg = {
+                    .sequence        = ++status_seq,
+                    .uptime_ms       = now,
+                    .state           = bridge_state,
+                    .can_state       = can_state,
+                    .can_rx_count    = g_bridge.raw_rx_frames,
+                    .can_tx_count    = g_bridge.raw_tx_frames,
+                    .drop_count      = g_bridge.drop_count,
+                    .free_heap_bytes = (uint16_t)xPortGetFreeHeapSize()
+                };
+
+                uint8_t status_buf[64];
+                ucdrBuffer ub;
+                ucdr_init_buffer(&ub, status_buf, sizeof(status_buf));
+                if (robot_interfaces_BridgeStatus_serialize(&ub, &status_msg)) {
+                    zenoh_ros2_pub_send(&g_status_pub, status_buf, ucdr_buffer_length(&ub));
+                }
             }
         }
 
-        /* Red LED alert on bus errors or topic silence */
-
-        printf("[Stats] CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | FDCAN_ERR:0x%08lX%s%s | DROP:%lu\r\n",
-               (unsigned long)g_bridge.can_to_zenoh_count, (unsigned long)g_bridge.zenoh_to_can_count,
-               (unsigned long)g_bridge.raw_rx_frames, (unsigned long)g_bridge.raw_tx_frames,
-               (unsigned long)err, boff ? " [BOFF]" : "", pass ? " [PROTO]" : "",
-               (unsigned long)g_bridge.drop_count);
+        /* 6. Disconnected: Full Teardown and Immediate Reconnection */
+        teardown_zenoh_session();
+        LOGI("zenoh", "Reconnection sequence engaged (next try in 500ms)...");
+        osDelay(500);
     }
 }
 
 /* ───────────────────── Public Starter ──────────────────────────────── */
 
+static void network_start_task(void *arg) {
+    (void)arg;
+
+    /* Start CAN hardware immediately so local bus functions even if Ethernet cable is unplugged */
+    can_hardware_init();
+
+    xTaskCreate(bridge_worker_task, "can_bridge", CONFIG_STACK_BRIDGE_TASK,
+                NULL, tskIDLE_PRIORITY + 3, NULL);
+
+    MX_LWIP_Init();
+
+    while (!wait_for_network()) {
+        health_kick();
+        LOGW("eth", "Ethernet link unavailable; retrying indefinitely...");
+        osDelay(1000);
+    }
+
+    xTaskCreate(zenoh_engine_task, "zenoh", CONFIG_STACK_ZENOH_TASK,
+                NULL, tskIDLE_PRIORITY + 2, NULL);
+    vTaskDelete(NULL);
+}
+
 void app_zenoh_start(void) {
     memset(&g_bridge, 0, sizeof(g_bridge));
     memset(g_runtimes, 0, sizeof(g_runtimes));
 
-    /* Initialize CAN hardware & queues BEFORE creating tasks to prevent NULL queue asserts */
-    can_hardware_init();
-    MX_LWIP_Init();
-
-    /* 1. Zenoh Manager + Diagnostics Loop (Single task) */
-    xTaskCreate(zenoh_engine_task, "zenoh", CONFIG_STACK_ZENOH_TASK,
-                NULL, tskIDLE_PRIORITY + 2, NULL);
-
-    /* 2. CAN->Zenoh High-Priority Reassembly Worker */
-    xTaskCreate(bridge_worker_task, "can_bridge", CONFIG_STACK_BRIDGE_TASK,
-                NULL, tskIDLE_PRIORITY + 3, NULL);
+    xTaskCreate(network_start_task, "net_init", 512,
+                NULL, tskIDLE_PRIORITY + 1, NULL);
 }

@@ -35,7 +35,7 @@ GEN_DIR      := $(PROJECT_DIR)/Core/Inc/generated
 # Python Code Generator
 PYTHON       := python3
 CODEGEN      := tools/msg2cdr.py
-MSG_DIR      := msg
+TRANSPORT_MSG_DIR := transport_msgs/msg
 
 # Flashing Tool Settings
 FLASH_ADDR   := 0x08000000
@@ -155,7 +155,11 @@ dev shell:
 
 msg:
 	@echo "==> [CodeGen] Generating Micro-CDR headers from .msg files..."
-	@$(PYTHON) $(CODEGEN) --package robot_msgs --msg-dir $(MSG_DIR) --out-dir $(GEN_DIR)
+	@$(PYTHON) $(CODEGEN) --package can_msgs --msg $(TRANSPORT_MSG_DIR)/Frame.msg --out-dir $(GEN_DIR)/transport
+	@$(PYTHON) $(CODEGEN) --package robot_interfaces --msg $(TRANSPORT_MSG_DIR)/FDFrame.msg --out-dir $(GEN_DIR)/transport
+	@$(PYTHON) $(CODEGEN) --package robot_interfaces --msg $(TRANSPORT_MSG_DIR)/TimedFrame.msg --out-dir $(GEN_DIR)/transport
+	@$(PYTHON) $(CODEGEN) --package robot_interfaces --msg $(TRANSPORT_MSG_DIR)/TimedFDFrame.msg --out-dir $(GEN_DIR)/transport
+	@$(PYTHON) $(CODEGEN) --package robot_interfaces --msg $(TRANSPORT_MSG_DIR)/BridgeStatus.msg --out-dir $(GEN_DIR)/transport
 
 ## -----------------------------------------------------------------------------
 ## Build Targets (Auto-delegates to Nix if tools not in PATH)
@@ -180,6 +184,10 @@ do-build:
 		-DCMAKE_TOOLCHAIN_FILE=$(TOOLCHAIN)
 	@echo "==> [Build] Compiling STM32 Firmware..."
 	@cmake --build $(BUILD_DIR) --parallel
+	@if [ ! -f $(BIN_FILE) ] && [ -f $(ELF_FILE) ]; then \
+		echo "==> [Build] Generating $(BIN_FILE)..."; \
+		arm-none-eabi-objcopy -O binary $(ELF_FILE) $(BIN_FILE); \
+	fi
 	@echo "==> [Size] Firmware Memory Usage:"
 	@arm-none-eabi-size $(ELF_FILE)
 
@@ -211,6 +219,15 @@ else
 endif
 
 do-flash:
+	@if [ ! -f $(BIN_FILE) ]; then \
+		if [ -f $(ELF_FILE) ]; then \
+			echo "==> [Flash] Generating $(BIN_FILE)..."; \
+			arm-none-eabi-objcopy -O binary $(ELF_FILE) $(BIN_FILE); \
+		else \
+			echo "Error: $(BIN_FILE) not found. Run 'make build' first." >&2; \
+			exit 1; \
+		fi; \
+	fi
 	@echo "==> [Flash] Writing $(BIN_FILE) to STM32 via st-flash..."
 	@st-flash --reset write $(BIN_FILE) $(FLASH_ADDR)
 
@@ -227,6 +244,15 @@ else
 endif
 
 do-flash-openocd:
+	@if [ ! -f $(BIN_FILE) ]; then \
+		if [ -f $(ELF_FILE) ]; then \
+			echo "==> [Flash] Generating $(BIN_FILE)..."; \
+			arm-none-eabi-objcopy -O binary $(ELF_FILE) $(BIN_FILE); \
+		else \
+			echo "Error: $(BIN_FILE) not found. Run 'make build' first." >&2; \
+			exit 1; \
+		fi; \
+	fi
 	@echo "==> [Flash] Writing $(BIN_FILE) via OpenOCD..."
 	@openocd -f interface/stlink.cfg -f target/$(OPENOCD_TARGET) \
 		-c "program $(BIN_FILE) $(FLASH_ADDR) reset exit"

@@ -18,11 +18,8 @@
 #include <ucdr/microcdr.h>
 
 /* Generated message headers */
-#include "generated/MotorStatus.h"
-#include "generated/ImuData.h"
-#include "generated/MotorCommand.h"
-#include "generated/Ping.h"
-#include "generated/Frame.h"
+#include "generated/transport/Frame.h"
+#include "generated/transport/TimedFrame.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,7 +29,7 @@ extern "C" {
  * 1. Network (Ethernet) Settings
  * ============================================================================== */
 // DHCPはなるべく使わないこと
-#define CONFIG_NET_USE_DHCP           0  /**< 0: Instant static IP (< 1s boot), 1: DHCP fallback */
+#define CONFIG_NET_USE_DHCP           0  /**< 0: static-first, 1: DHCP-first with static fallback */
 // stm32の静的(static)IP
 #define CONFIG_NET_STATIC_IP          "192.168.50.77"
 #define CONFIG_NET_STATIC_NETMASK     "255.255.255.0"
@@ -40,6 +37,7 @@ extern "C" {
 // これは部室用
 #define CONFIG_NET_STATIC_GATEWAY     "192.168.50.1"
 #define CONFIG_NET_DHCP_TIMEOUT_SEC   5
+#define CONFIG_NET_LINK_TIMEOUT_SEC   10
 
 /* ==============================================================================
  * 2. Zenoh & ROS 2 Settings
@@ -57,13 +55,15 @@ extern "C" {
 #define CONFIG_ROS2_NODE_NAME         "stm32_bridge"
 #define CONFIG_ROS2_NODE_NS           "/"
 #define CONFIG_ROS2_DOMAIN_ID         0
+#define CONFIG_ROS2_STATUS_TOPIC      "status"    /**< Comprehensive MCU & bridge status topic */
+#define CONFIG_ROS2_STATUS_MS         1000        /**< Status publish period in ms (1 Hz) */
 
 /* ==============================================================================
  * 3. CAN Bus Settings
  * ============================================================================== */
  
 // baudrateは合わせる
-#define CONFIG_CAN_BITRATE            1000000U  /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
+#define CONFIG_CAN_BITRATE            500000U   /**< Default: 500 kbps (1M, 500k, 250k, 125k) */
 #define CONFIG_CAN_STATS_PERIOD_MS    3000     /**< Diagnostics reporting interval */
 #define CONFIG_CAN_WATCHDOG_MS        1500     /**< Disconnect timeout before Red LED alert */
 #define CONFIG_CAN_FRAME_TIMEOUT_MS   100      /**< Incomplete multi-frame drop timeout */
@@ -97,8 +97,8 @@ typedef enum {
     BRIDGE_DIR_ROS_TO_CAN,      /**< ROS 2 message (Subscribe) -> CAN frames */
     BRIDGE_DIR_CAN_RECV,        /**< Standalone CAN Receiver: log to serial without PC/Zenoh */
     BRIDGE_DIR_CAN_ECHO = BRIDGE_DIR_CAN_RECV, /**< Alias for backward compatibility */
-    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< can_msgs/Frame (Subscribe) -> Direct CAN frame TX */
-    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> can_msgs/Frame (Publish) */
+    BRIDGE_DIR_ROS_TO_CAN_RAW,  /**< robot_interfaces/Frame -> Direct CAN frame TX */
+    BRIDGE_DIR_CAN_TO_ROS_RAW,  /**< Direct CAN frame RX -> robot_interfaces/Frame */
 } bridge_dir_t;
 
 typedef void (*msg_print_fn_t)(const void *topic);
@@ -114,47 +114,6 @@ typedef struct {
     cdr_deserialize_fn_t  deserialize_fn;
     msg_print_fn_t        print_fn;
 } bridge_topic_t;
-
-#define BRIDGE_CAN_TO_ROS(topic, msg, can_id) \
-    { \
-        .topic_name     = topic, \
-        .dir            = BRIDGE_DIR_CAN_TO_ROS, \
-        .can_base_id    = can_id, \
-        .msg_size       = sizeof(robot_msgs_##msg), \
-        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
-        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
-        .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
-        .deserialize_fn = NULL, \
-        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
-    }
-
-#define BRIDGE_ROS_TO_CAN(topic, msg, can_id) \
-    { \
-        .topic_name     = topic, \
-        .dir            = BRIDGE_DIR_ROS_TO_CAN, \
-        .can_base_id    = can_id, \
-        .msg_size       = sizeof(robot_msgs_##msg), \
-        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
-        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
-        .serialize_fn   = NULL, \
-        .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
-        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
-    }
-
-#define BRIDGE_CAN_RECV(topic, msg, rx_id) \
-    { \
-        .topic_name     = topic, \
-        .dir            = BRIDGE_DIR_CAN_RECV, \
-        .can_base_id    = rx_id, \
-        .msg_size       = sizeof(robot_msgs_##msg), \
-        .dds_type       = robot_msgs_##msg##_DDS_TYPE, \
-        .type_hash      = robot_msgs_##msg##_TYPE_HASH, \
-        .serialize_fn   = (cdr_serialize_fn_t)robot_msgs_##msg##_serialize, \
-        .deserialize_fn = (cdr_deserialize_fn_t)robot_msgs_##msg##_deserialize, \
-        .print_fn       = (msg_print_fn_t)robot_msgs_##msg##_print, \
-    }
-
-#define BRIDGE_CAN_ECHO(topic, msg, rx_id, ...) BRIDGE_CAN_RECV(topic, msg, rx_id)
 
 #define BRIDGE_ROS_TO_CAN_FRAME(topic) \
     { \
@@ -189,25 +148,9 @@ typedef struct {
 // ここにデータ送受信を定義
 // can <--> ros2の方向に注意
 static const bridge_topic_t g_bridge_topics[] = {
-    /* 1. CAN -> ROS 2: MotorStatus (28B = 4 CAN frames: 0x100..0x103) */
-    BRIDGE_CAN_TO_ROS("motor_status",  MotorStatus,  0x100),
-
-    /* 2. CAN -> ROS 2: ImuData (24B = 3 CAN frames: 0x200..0x202) */
-    BRIDGE_CAN_TO_ROS("imu_data",      ImuData,      0x200),
-
-    /* 3. ROS 2 -> CAN: MotorCommand (8B = 1 CAN frame: 0x300) */
-    BRIDGE_ROS_TO_CAN("motor_command", MotorCommand, 0x300),
-
-    /* 4. Standalone CAN Receiver: Ping (rx: 0x400) */
-    BRIDGE_CAN_RECV("ping_echo",       Ping,         0x400),
-    // 成功！
-    BRIDGE_CAN_TO_ROS("kokura_speak",  Ping,         0x400),
-
-    /* 5. Robstride CAN Bridge: ROS 2 -> CAN (robstride/can_tx) */
-    BRIDGE_ROS_TO_CAN_FRAME("robstride/can_tx"),
-
-    /* 6. Robstride CAN Bridge: CAN -> ROS 2 (robstride/can_rx) */
-    BRIDGE_CAN_TO_ROS_FRAME("robstride/can_rx"),
+    /* Generic classic CAN transport */
+    BRIDGE_ROS_TO_CAN_FRAME("can/tx"),
+    BRIDGE_CAN_TO_ROS_FRAME("can/rx"),
 };
 
 #define BRIDGE_TOPIC_COUNT  (sizeof(g_bridge_topics) / sizeof(g_bridge_topics[0]))

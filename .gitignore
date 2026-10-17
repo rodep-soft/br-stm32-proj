@@ -30,6 +30,7 @@ compile_commands.json
 
 # Generated headers
 Core/Inc/generated/
+**/Core/Inc/generated/
 
 # Python
 __pycache__/

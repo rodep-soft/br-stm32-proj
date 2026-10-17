@@ -26,7 +26,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdio.h>
+#include "app_log.h"
+#include "health.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -76,7 +78,11 @@ static void MX_USART3_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+/* printf() sink: goes through the non-blocking log ring (never stalls the robot). */
+int __io_putchar(int ch) {
+    app_log_putc(ch);
+    return ch;
+}
 /* USER CODE END 0 */
 
 /**
@@ -99,7 +105,8 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
+  /* Reset-cause capture + independent watchdog as early as possible. */
+  health_early_init();
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -117,7 +124,8 @@ int main(void)
   MX_ICACHE_Init();
   MX_USART3_UART_Init();
   /* USER CODE BEGIN 2 */
-
+  app_log_init();
+  health_log_boot_report();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -502,6 +510,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  health_reset("Error_Handler (HAL error)");
   __disable_irq();
   while (1)
   {

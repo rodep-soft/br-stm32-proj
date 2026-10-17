@@ -32,37 +32,60 @@ message("Build type: " ${CMAKE_BUILD_TYPE})
 enable_language(C ASM)
 
 # Generate Micro-CDR headers from .msg files
-set(MSG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../msg")
 set(GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc/generated")
 file(MAKE_DIRECTORY ${GEN_DIR})
-file(GLOB MSG_FILES "${MSG_DIR}/*.msg")
-if(MSG_FILES)
+set(TRANSPORT_MSG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../transport_msgs/msg")
+set(TRANSPORT_GEN_DIR "${GEN_DIR}/transport")
+file(MAKE_DIRECTORY ${TRANSPORT_GEN_DIR})
+file(GLOB TRANSPORT_MSG_FILES "${TRANSPORT_MSG_DIR}/*.msg")
+if(TRANSPORT_MSG_FILES)
     add_custom_command(
-        OUTPUT ${GEN_DIR}/generated.stamp
+        OUTPUT ${TRANSPORT_GEN_DIR}/generated.stamp
         COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
-            --package robot_msgs
-            --msg-dir ${MSG_DIR}
-            --out-dir ${GEN_DIR}
-        COMMAND ${CMAKE_COMMAND} -E touch ${GEN_DIR}/generated.stamp
-        DEPENDS ${MSG_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
-        COMMENT "Generating Micro-CDR headers from .msg files"
+            --package can_msgs --msg ${TRANSPORT_MSG_DIR}/Frame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package robot_interfaces --msg ${TRANSPORT_MSG_DIR}/FDFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package robot_interfaces --msg ${TRANSPORT_MSG_DIR}/TimedFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package robot_interfaces --msg ${TRANSPORT_MSG_DIR}/TimedFDFrame.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package robot_interfaces --msg ${TRANSPORT_MSG_DIR}/BridgeStatus.msg --out-dir ${TRANSPORT_GEN_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}/std_msgs
+        COMMAND PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../tools python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py
+            --package std_msgs --msg ${CMAKE_CURRENT_SOURCE_DIR}/../std_msgs/msg/UInt32.msg --out-dir ${GEN_DIR}/std_msgs
+        COMMAND ${CMAKE_COMMAND} -E touch ${TRANSPORT_GEN_DIR}/generated.stamp
+        DEPENDS ${TRANSPORT_MSG_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/msg2cdr.py ${CMAKE_CURRENT_SOURCE_DIR}/../std_msgs/msg/UInt32.msg
+        COMMENT "Generating CAN transport and std_msgs Micro-CDR headers"
         VERBATIM
     )
-    add_custom_target(generate_messages DEPENDS ${GEN_DIR}/generated.stamp)
+    add_custom_target(generate_transport_messages DEPENDS ${TRANSPORT_GEN_DIR}/generated.stamp)
 endif()
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
 
-if(MSG_FILES)
-    add_dependencies(${CMAKE_PROJECT_NAME} generate_messages)
+if(TRANSPORT_MSG_FILES)
+    add_dependencies(${CMAKE_PROJECT_NAME} generate_transport_messages)
 endif()
+
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_OBJCOPY} -O binary
+            $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
+            ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
+    COMMENT "Generating ${CMAKE_PROJECT_NAME}.bin"
+)
+
+# Use custom FindThreads module to prevent linking -lpthreads in bare-metal toolchains
+list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
+set(CMAKE_THREAD_LIBS_INIT "")
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
-
-list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/modules")
 set(ZP_PLATFORM "freertos_lwip" CACHE STRING "Zenoh-Pico platform" FORCE)
+set(Z_TRANSPORT_LEASE 3000 CACHE STRING "Link lease duration in milliseconds" FORCE)
+set(Z_TRANSPORT_LEASE_EXPIRE_FACTOR 3 CACHE STRING "Session lease expire factor" FORCE)
+set(Z_TRANSPORT_CONNECT_TIMEOUT 1000 CACHE STRING "Link connect timeout in milliseconds" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build static lib" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Disable testing" FORCE)
 set(BUILD_EXAMPLES OFF CACHE BOOL "Disable examples" FORCE)
@@ -90,6 +113,9 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/app_zenoh.c
     Core/Src/zenoh_ros2.c
+    Core/Src/app_log.c
+    Core/Src/bridge_core.c
+    Core/Src/health.c
 )
 
 # Add include paths
@@ -103,7 +129,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Remove wrong libob.a library dependency when using cpp files
-list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
+list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob pthreads pthread)
 
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}

@@ -136,6 +136,20 @@ standard names. */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
 #define configUSE_RECURSIVE_MUTEXES 1
 #define configUSE_COUNTING_SEMAPHORES 1
+
+/* Robustness / debuggability */
+#define configCHECK_FOR_STACK_OVERFLOW           2
+#define configUSE_MALLOC_FAILED_HOOK             1
+#define INCLUDE_uxTaskGetStackHighWaterMark      1
+#define INCLUDE_xTaskGetCurrentTaskHandle        1
+
+/* Any failed assertion is logged to the UART, saved in the crash record and
+ * followed by a clean reset (instead of silently spinning until the IWDG). */
+#ifndef __ASSEMBLER__
+void app_assert_failed(const char *file, int line) __attribute__((noreturn));
+#endif
+#undef configASSERT
+#define configASSERT( x ) do { if ((x) == 0) { app_assert_failed(__FILE__, __LINE__); } } while (0)
 /* USER CODE END Defines */
 
 #endif /* FREERTOS_CONFIG_H */

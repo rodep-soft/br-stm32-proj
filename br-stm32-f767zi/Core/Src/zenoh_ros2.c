@@ -6,7 +6,6 @@
 #include "zenoh_ros2.h"
 #include <stdio.h>
 #include <string.h>
-#include "main.h"
 #include <ucdr/microcdr.h>
 
 #define ZENOH_ROS2_SESSION_ID "stm32"
@@ -173,13 +172,14 @@ bool zenoh_ros2_pub_send(zenoh_ros2_pub_t *pub, const uint8_t *cdr_payload, size
 
     /* rmw_zenoh_cpp attachment metadata format (33 bytes total):
      * - 8 bytes: int64_t sequence_number (little endian)
-     * - 8 bytes: int64_t source_timestamp in nanoseconds (little endian)
+     * - 8 bytes: int64_t source_timestamp in nanoseconds (zero: unsynchronized)
      * - 1 byte : sequence length of publisher GID (16 = 0x10)
      * - 16 bytes: publisher GID array
      */
     uint8_t att_buf[33];
     int64_t seq = pub->sequence_number++;
-    int64_t ts = (int64_t)HAL_GetTick() * 1000000LL;
+    /* The PC ingress assigns ROS time; STM32 has no synchronized wall clock. */
+    int64_t ts = 0;
 
     memcpy(&att_buf[0], &seq, 8);
     memcpy(&att_buf[8], &ts, 8);
