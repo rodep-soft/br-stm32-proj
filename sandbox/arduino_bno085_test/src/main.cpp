@@ -17,7 +17,7 @@
 #define BNO08X_RESET 7
 
 // logの表示の有無
-const bool log_accel = false;
+const bool log_accel = true;
 const bool log_gyro = false;
 
 volatile bool new_data_flug = false;
@@ -47,7 +47,7 @@ void interruptHandler(void) {
 
 void setup(void) {
 
-  Serial.begin(1000000);
+  Serial.begin(112500);
   while (!Serial) delay(10);     // will pause Zero, Leonardo, etc until serial console opens
 
   Serial.println("BNO085 demo");
@@ -74,22 +74,21 @@ void setup(void) {
 
 void loop() {
 
-  if (bno08x.wasReset()) {
-    Serial.print("sensor was reset ");
-    setReports(reportType_accel, reportIntervalUs_accel);
-    setReports(reportType_gyro, reportIntervalUs_gyro);
-  }
-
+  // if (bno08x.wasReset()) {
+  //   Serial.print("sensor was reset ");
+  //   setReports(reportType_accel, reportIntervalUs_accel);
+  //   setReports(reportType_gyro, reportIntervalUs_gyro);
+  // }
+  
   if (!new_data_flug) {
     return;
   }
   new_data_flug = false;
   if (bno08x.getSensorEvent(&sensorValue)) {
     // in this demo only one report type will be received depending on FAST_MODE define (above)
-
     if (sensorValue.sensorId == reportType_accel && log_accel) {
-      Serial.println((unsigned long long)sensorValue.timestamp);
-      /*
+      //Serial.println((unsigned long long)sensorValue.timestamp);
+      
       static long last = 0;
       long now = micros();
       Serial.print(now - last);             Serial.print("\t");
@@ -103,7 +102,7 @@ void loop() {
       Serial.print(sensorValue.un.accelerometer.x);                Serial.print("\t");
       Serial.print(sensorValue.un.accelerometer.y);              Serial.print("\t");
       Serial.println(sensorValue.un.accelerometer.z);
-      */
+      
     }
     else if (sensorValue.sensorId == reportType_gyro && log_gyro) {
       Serial.println((unsigned long long)sensorValue.timestamp);
