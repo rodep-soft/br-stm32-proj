@@ -1,4 +1,4 @@
-"./Core/Src/bno085_can.o"
+"./Core/Src/can.o"
 "./Core/Src/main.o"
 "./Core/Src/stm32f3xx_hal_msp.o"
 "./Core/Src/stm32f3xx_it.o"
@@ -31,3 +31,4 @@
 "./Drivers/sh2/Src/sh2_SensorValue.o"
 "./Drivers/sh2/Src/sh2_util.o"
 "./Drivers/sh2/Src/shtp.o"
+"./protocols/bno085_can.o"

@@ -28,6 +28,7 @@
 
 #include "bno08x.h"
 #include "bno085_can.h"
+#include "can.h"
 
 /* USER CODE END Includes */
 
@@ -66,7 +67,7 @@ static void MX_CAN_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART2_UART_Init(void);
 /* USER CODE BEGIN PFP */
-static void CAN_LoopbackTest(void);
+//static void CAN_LoopbackTest(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -77,11 +78,11 @@ static sh2_SensorValue_t last_accel;
 static sh2_SensorValue_t last_gyro;
 
 /* ===== CANループバックテスト設定 ===== */
-#define CAN_TEST_STD_ID     0x100U   /* 送信CAN ID (DBCのBNO085_GyroZと同一) */
-#define CAN_TEST_DLC        8U       /* データ長 (byte) */
-#define CAN_TEST_DATA_BYTE  0xFFU    /* テストデータ (全バイト0xFF) */
-#define CAN_TEST_PERIOD_MS  1000U    /* whileループ内で再送する間隔 (ms) */
-#define CAN_TEST_PERIODIC   1        /* 1: 周期送信も行う / 0: 起動時1回のみ */
+// #define CAN_TEST_STD_ID     0x100U   /* 送信CAN ID (DBCのBNO085_GyroZと同一) */
+// #define CAN_TEST_DLC        8U       /* データ長 (byte) */
+// #define CAN_TEST_DATA_BYTE  0xFFU    /* テストデータ (全バイト0xFF) */
+// #define CAN_TEST_PERIOD_MS  1000U    /* whileループ内で再送する間隔 (ms) */
+// #define CAN_TEST_PERIODIC   1        /* 1: 周期送信も行う / 0: 起動時1回のみ */
 
 /* USER CODE END 0 */
 
@@ -150,8 +151,8 @@ int main(void)
     }
     else
     {
-      printf("[OK] CAN started (loopback mode)\r\n");
-      CAN_LoopbackTest();   /* 起動時に1回テスト */
+      printf("[OK] CAN started \r\n");
+      //CAN_LoopbackTest();   /* 起動時に1回テスト */
     }
   }
 
@@ -188,18 +189,8 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-#if CAN_TEST_PERIODIC
-    // --- CANループバック周期テスト (BNOの状態に関係なく実行) ---
-    {
-      static uint32_t last_can_test = 0;
-      uint32_t now_tick = HAL_GetTick();
-      if ((now_tick - last_can_test) >= CAN_TEST_PERIOD_MS)
-      {
-        last_can_test = now_tick;
-        CAN_LoopbackTest();
-      }
-    }
-#endif
+
+
 
     // 【自動再起処理】初期化できていない場合は1秒おきにリトライする
     if (!bno_initialized)
@@ -237,43 +228,56 @@ int main(void)
       bno08x_enable_report(SH2_GYROSCOPE_CALIBRATED, 5000);
     }
 
-    if (bno08x_get_sensor_event(&sensor_value))
-    {
+    static bool has_accel = false;
+    static bool has_gyro = false;
 
-      static bool has_accel = false;
-      static bool has_gyro = false;
-
-      //printf("[DEBUG]: %ld", last_accel[0]);
-
-      if (sensor_value.sensorId == SH2_ACCELEROMETER)
+    if (bno_data_ready) {
+      bno_data_ready = false;
+    
+      if (bno08x_get_sensor_event(&sensor_value))
       {
-//        printf("[DEBUG]: ACCEL RECEIVED\n");
-    	last_accel = sensor_value;
-        has_accel = true;
-      }
-      else if (sensor_value.sensorId == SH2_GYROSCOPE_CALIBRATED)
-      {
-        last_gyro = sensor_value;
-        has_gyro = true;
 
-        //last_sensor_data.gyro_z = sensor_value.un.gyroscope.z;
-        //last_sensor_data.timestamp = sensor_value.timestamp;
-      }
+        //printf("[DEBUG]: %ld", last_accel[0]);
 
-      static uint32_t last_print = 0;
-      uint32_t now = HAL_GetTick();
-      if ((now - last_print) >= 200)
-      {
-        last_print = now;
-        if (has_accel || has_gyro)
+        if (sensor_value.sensorId == SH2_ACCELEROMETER)
         {
-          // printf("ACC[m/s^2]: X=%+6.2f, Y=%+6.2f, Z=%+6.2f | GYR[rad/s]: X=%+6.2f, Y=%+6.2f, Z=%+6.2f\r\n",
-          //        last_accel[0], last_accel[1], last_accel[2],
-          //        last_gyro[0], last_gyro[1], last_gyro[2])
-          // printf("ACC[m/s^2]: X=%f, Y=%f, Z=%f, timestamp=%lu, seqnum=%lu\r\n",
-          //        last_accel.un.accelerometer.x, last_accel.un.accelerometer.y, last_accel.un.accelerometer.z, last_accel.timestamp, last_accel.sequence);
+  //        printf("[DEBUG]: ACCEL RECEIVED\n");
+          last_accel = sensor_value;
+          has_accel = true;
+        }
+        else if (sensor_value.sensorId == SH2_GYROSCOPE_CALIBRATED)
+        {
+          last_gyro = sensor_value;
+          has_gyro = true;
+
+          //last_sensor_data.gyro_z = sensor_value.un.gyroscope.z;
+          //last_sensor_data.timestamp = sensor_value.timestamp;
+        }
+
+        static uint32_t last_print = 0;
+        uint32_t now = HAL_GetTick();
+        if ((now - last_print) >= 200)
+        {
+          last_print = now;
+          if (has_accel || has_gyro)
+          {
+            // printf("ACC[m/s^2]: X=%+6.2f, Y=%+6.2f, Z=%+6.2f | GYR[rad/s]: X=%+6.2f, Y=%+6.2f, Z=%+6.2f\r\n",
+            //        last_accel[0], last_accel[1], last_accel[2],
+            //        last_gyro[0], last_gyro[1], last_gyro[2])
+            // printf("ACC[m/s^2]: X=%f, Y=%f, Z=%f, timestamp=%lu, seqnum=%lu\r\n",
+            //        last_accel.un.accelerometer.x, last_accel.un.accelerometer.y, last_accel.un.accelerometer.z, last_accel.timestamp, last_accel.sequence);
+          }
         }
       }
+    }
+    
+    static uint32_t last_tick = 0;
+    uint32_t now = HAL_GetTick();
+    if (now - last_tick >= BNO085_CAN_BNO085_DATA_CYCLE_TIME_MS)
+    {
+      last_tick = now;
+      can_send(&last_gyro, &last_accel, &hcan);
+      CAN_LoopbackRecieve(&hcan);
     }
   }
   /* USER CODE END 3 */
@@ -494,112 +498,6 @@ int __io_putchar(int ch)
   return ch;
 }
 
-/* ===== CANループバックテスト =====
- * 0xFF×8のデータを送信し、ループバックで自分のフレームを受信するか確認する。
- */
-static void CAN_LoopbackTest(void)
-{
-  CAN_TxHeaderTypeDef tx_header = {0};
-  CAN_RxHeaderTypeDef rx_header = {0};
-  uint8_t tx_data[CAN_TEST_DLC];
-  uint8_t rx_data[8] = {0};
-  uint32_t tx_mailbox;
-  HAL_StatusTypeDef status;
-  struct bno085_can_bno085_gyro_z_t tx_msg;
-  struct bno085_can_bno085_gyro_z_t rx_msg;
-
-  // transmit messageを初期化
-  bno085_can_bno085_gyro_z_init(&tx_msg);
-
-  tx_msg.gyro_z = last_gyro.un.gyroscope.z;
-  tx_msg.timestamp = last_gyro.timestamp;
-
-  int ret = bno085_can_bno085_gyro_z_pack(tx_data, &tx_msg, CAN_TEST_DLC);
-
-  if (ret <= 0) 
-  {
-    printf("[NG] bno085_can_bno085_gyro_z_pack failed (ret=%d)\r\n", ret);
-    return;
-  }
-
-  tx_header.StdId = CAN_TEST_STD_ID;
-  tx_header.IDE   = CAN_ID_STD;
-  tx_header.RTR   = CAN_RTR_DATA;
-  tx_header.DLC   = CAN_TEST_DLC;
-
-  printf("CAN TX: ID=0x%03lX DLC=%lu DATA=",
-         (unsigned long)tx_header.StdId, (unsigned long)tx_header.DLC);
-  for (uint32_t i = 0; i < tx_header.DLC; i++)
-  {
-    printf("%02X ", tx_data[i]);
-  }
-  printf("\r\n");
-
-  status = HAL_CAN_AddTxMessage(&hcan, &tx_header, tx_data, &tx_mailbox);
-  if (status != HAL_OK)
-  {
-    printf("[NG] HAL_CAN_AddTxMessage returned %d\r\n", (int)status);
-    return;
-  }
-
-  /* --- 送信完了待ち --- */
-  uint32_t t0 = HAL_GetTick();
-  while (HAL_CAN_IsTxMessagePending(&hcan, tx_mailbox))
-  {
-    if ((HAL_GetTick() - t0) > 100)
-    {
-      printf("[NG] TX timeout\r\n");
-      return;
-    }
-  }
-  printf("[OK] TX complete (mailbox %lu)\r\n", (unsigned long)tx_mailbox);
-
-  /* --- ループバックされたフレームの受信待ち --- */
-  t0 = HAL_GetTick();
-  while (HAL_CAN_GetRxFifoFillLevel(&hcan, CAN_RX_FIFO0) == 0)
-  {
-    if ((HAL_GetTick() - t0) > 100)
-    {
-      printf("[NG] RX timeout (no loopback frame)\r\n");
-      return;
-    }
-  }
-
-  status = HAL_CAN_GetRxMessage(&hcan, CAN_RX_FIFO0, &rx_header, rx_data);
-  if (status != HAL_OK)
-  {
-    printf("[NG] HAL_CAN_GetRxMessage returned %d\r\n", (int)status);
-    return;
-  }
-
-  ret = bno085_can_bno085_gyro_z_unpack(&rx_msg, rx_data, CAN_TEST_DLC);
-  printf("CAN RX: ID=0x%03lX IDE=%s DLC=%lu DATA=",
-         (unsigned long)rx_header.StdId,
-         (rx_header.IDE == CAN_ID_STD) ? "STD" : "EXT",
-         (unsigned long)rx_header.DLC);
-  printf("gyro_z=%f timestamp=%lu", rx_msg.gyro_z, (unsigned long)rx_msg.timestamp);
-  
-  // for (uint32_t i = 0; i < rx_header.DLC; i++)
-  // {
-  //   //printf("%02X ", rx_data[i]);
-  // }
-  printf("\r\n");
-
-  /* --- 送受信一致チェック --- */
-  bool match = (rx_header.StdId == CAN_TEST_STD_ID) &&
-               (rx_header.IDE == CAN_ID_STD) &&
-               (rx_header.DLC == CAN_TEST_DLC);
-  for (uint32_t i = 0; (i < CAN_TEST_DLC) && match; i++)
-  {
-    if (rx_data[i] != tx_data[i])
-    {
-      match = false;
-    }
-  }
-
-  printf(match ? "[PASS] loopback data matched\r\n"
-               : "[FAIL] TX/RX mismatch\r\n");
-}
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {

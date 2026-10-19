@@ -27,4 +27,5 @@ Core/Startup \
 Drivers/STM32F3xx_HAL_Driver/Src \
 Drivers/bno08x/Src \
 Drivers/sh2/Src \
+protocols \
 

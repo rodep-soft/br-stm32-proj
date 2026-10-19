@@ -1,0 +1,2 @@
+../Core/Src/can.c:9:6:can_send	3
+../Core/Src/can.c:55:6:CAN_LoopbackRecieve	12

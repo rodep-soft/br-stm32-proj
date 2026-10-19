@@ -46,6 +46,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/bno08x/Src/sh2_hal_stm32.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/bno08x/Src/bno08x.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/sh2/Src/euler.c
@@ -61,7 +62,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/bno08x/Inc
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/sh2/Inc
-    ${CMAKE_CURRENT_SOURCE_DIR}/protocols/bno085_can.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/protocols
 )
 
 # Add project symbols (macros)
