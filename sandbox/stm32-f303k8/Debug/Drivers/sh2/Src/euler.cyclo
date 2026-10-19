@@ -1,0 +1,4 @@
+../Drivers/sh2/Src/euler.c:29:7:q_to_yaw	1
+../Drivers/sh2/Src/euler.c:40:7:q_to_pitch	3
+../Drivers/sh2/Src/euler.c:51:7:q_to_roll	1
+../Drivers/sh2/Src/euler.c:61:6:q_to_ypr	3

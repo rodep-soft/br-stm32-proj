@@ -1,0 +1,11 @@
+../Core/Src/main.c:92:5:main	13
+../Core/Src/main.c:286:6:SystemClock_Config	3
+../Core/Src/main.c:323:13:MX_CAN_Init	2
+../Core/Src/main.c:360:13:MX_SPI1_Init	2
+../Core/Src/main.c:400:13:MX_USART2_UART_Init	2
+../Core/Src/main.c:433:13:MX_DMA_Init	1
+../Core/Src/main.c:451:13:MX_GPIO_Init	1
+../Core/Src/main.c:486:5:__io_putchar	2
+../Core/Src/main.c:500:13:CAN_LoopbackTest	17
+../Core/Src/main.c:604:6:HAL_GPIO_EXTI_Callback	2
+../Core/Src/main.c:617:6:Error_Handler	1

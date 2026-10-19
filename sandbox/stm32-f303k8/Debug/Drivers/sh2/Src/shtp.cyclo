@@ -1,0 +1,11 @@
+../Drivers/sh2/Src/shtp.c:88:13:shtp_init	2
+../Drivers/sh2/Src/shtp.c:99:16:getInstance	3
+../Drivers/sh2/Src/shtp.c:113:24:min_u16	2
+../Drivers/sh2/Src/shtp.c:124:12:txProcess	6
+../Drivers/sh2/Src/shtp.c:184:13:rxAssemble	22
+../Drivers/sh2/Src/shtp.c:305:7:shtp_open	5
+../Drivers/sh2/Src/shtp.c:342:6:shtp_close	1
+../Drivers/sh2/Src/shtp.c:354:6:shtp_setEventCallback	1
+../Drivers/sh2/Src/shtp.c:364:5:shtp_listenChan	3
+../Drivers/sh2/Src/shtp.c:382:5:shtp_send	3
+../Drivers/sh2/Src/shtp.c:401:6:shtp_service	2

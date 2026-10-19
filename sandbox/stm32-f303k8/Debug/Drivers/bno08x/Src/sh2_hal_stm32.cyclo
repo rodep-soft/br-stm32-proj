@@ -1,0 +1,8 @@
+../Drivers/bno08x/Src/sh2_hal_stm32.c:17:13:wait_for_int_low	3
+../Drivers/bno08x/Src/sh2_hal_stm32.c:29:6:sh2_hal_stm32_reset	1
+../Drivers/bno08x/Src/sh2_hal_stm32.c:44:12:hal_open	2
+../Drivers/bno08x/Src/sh2_hal_stm32.c:62:13:hal_close	1
+../Drivers/bno08x/Src/sh2_hal_stm32.c:73:12:hal_read	10
+../Drivers/bno08x/Src/sh2_hal_stm32.c:125:12:hal_write	7
+../Drivers/bno08x/Src/sh2_hal_stm32.c:168:17:hal_getTimeUs	1
+../Drivers/bno08x/Src/sh2_hal_stm32.c:182:12:sh2_hal_stm32_get	1
