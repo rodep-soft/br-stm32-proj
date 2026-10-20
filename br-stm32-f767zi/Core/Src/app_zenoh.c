@@ -108,7 +108,10 @@ static void can_hardware_init(void) {
     hcan1.Init.TransmitFifoPriority = ENABLE;
 
     if (HAL_CAN_Init(&hcan1) != HAL_OK) {
-        configASSERT(0);
+        LOGE("can", "HAL_CAN_Init failed (err=0x%08lX)! Retrying...", (unsigned long)hcan1.ErrorCode);
+        HAL_CAN_ResetError(&hcan1);
+        osDelay(100);
+        HAL_CAN_Init(&hcan1);
     }
 
     /* Check if raw CAN frame bridging is requested */
@@ -228,22 +231,29 @@ static bool can_send_frame_ex(uint32_t id, const uint8_t *data, uint8_t dlc, boo
 
     /* Ensure CAN controller is listening / ready */
     if (hcan1.State != HAL_CAN_STATE_LISTENING && hcan1.State != HAL_CAN_STATE_READY) {
-        printf("[CAN-TX-WARN] hcan1.State=%d, restarting CAN...\r\n", (int)hcan1.State);
+        static uint32_t last_restart_print = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - last_restart_print >= 2000) {
+            last_restart_print = now;
+            LOGW("can", "hcan1.State=%d, restarting CAN...", (int)hcan1.State);
+        }
         HAL_CAN_Start(&hcan1);
     }
 
-    TickType_t start = xTaskGetTickCount();
-    while (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
-        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(CONFIG_CAN_TX_TIMEOUT_MS)) {
-            printf("[CAN-TX-ERR] Tx Mailbox Full! TSR=0x%08lX free=%lu state=%d err=0x%08lX\r\n",
-                   (unsigned long)hcan1.Instance->TSR,
-                   (unsigned long)HAL_CAN_GetTxMailboxesFreeLevel(&hcan1),
-                   (int)hcan1.State, (unsigned long)hcan1.ErrorCode);
-            HAL_CAN_AbortTxRequest(&hcan1, CAN_TX_MAILBOX0 | CAN_TX_MAILBOX1 | CAN_TX_MAILBOX2);
-            g_bridge.drop_count++;
-            return false;
+    /* Non-blocking mailbox check: do not spin-wait and freeze other RTOS tasks */
+    if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0) {
+        static uint32_t last_full_print = 0;
+        uint32_t now = HAL_GetTick();
+        if (now - last_full_print >= 2000) {
+            last_full_print = now;
+            LOGW("can", "Tx Mailbox Full! (TSR=0x%08lX, Bus-Off=%d, Passive=%d, dropping)",
+                 (unsigned long)hcan1.Instance->TSR,
+                 (CAN1->ESR & (1U << 2)) != 0, (CAN1->ESR & (1U << 1)) != 0);
         }
-        vTaskDelay(pdMS_TO_TICKS(1));
+        /* Abort oldest stuck mailbox to prevent permanent stall */
+        HAL_CAN_AbortTxRequest(&hcan1, CAN_TX_MAILBOX0 | CAN_TX_MAILBOX1 | CAN_TX_MAILBOX2);
+        g_bridge.drop_count++;
+        return false;
     }
 
     uint32_t mb;
@@ -739,14 +749,20 @@ static void zenoh_engine_task(void const *arg) {
         while (g_bridge.zenoh_ready) {
             osDelay(500);
 
-            /* Watchdog: Feed hardware IWDG only if worker task is responsive */
+            /* 1. Heartbeat: Toggle Blue LED (LD2) to visually confirm MCU is running */
+            HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+            /* 2. Feed hardware IWDG at all times to prevent unexpected reboot */
+            health_kick();
+
             uint32_t now = HAL_GetTick();
-            if ((now - g_bridge_worker_heartbeat) < 3000) {
-                health_kick();
-            } else {
-                LOGE("watchdog", "Bridge worker task stalled! (heartbeat age: %lu ms)",
-                     (unsigned long)(now - g_bridge_worker_heartbeat));
-                /* Let IWDG reset MCU cleanly if worker is dead */
+            if ((now - g_bridge_worker_heartbeat) >= 5000) {
+                static uint32_t last_stall_warn = 0;
+                if (now - last_stall_warn >= 3000) {
+                    last_stall_warn = now;
+                    LOGW("watchdog", "Bridge worker task delayed (heartbeat age: %lu ms)",
+                         (unsigned long)(now - g_bridge_worker_heartbeat));
+                }
             }
 
             /* Check A: Physical Ethernet Link */
@@ -791,6 +807,17 @@ static void zenoh_engine_task(void const *arg) {
             bool boff = (esr & (1U << 2)) != 0;
             bool pass = (esr & (1U << 1)) != 0;
 
+            /* Auto-recovery from Bus-Off */
+            if (boff) {
+                static uint32_t last_boff_recover = 0;
+                if (now - last_boff_recover >= 1500) {
+                    last_boff_recover = now;
+                    LOGW("can", "CAN in Bus-Off! Forcing restart recovery...");
+                    HAL_CAN_Stop(&hcan1);
+                    HAL_CAN_Start(&hcan1);
+                }
+            }
+
             /* Diagnostics & Stats (every CONFIG_CAN_STATS_PERIOD_MS) */
             if (now - last_stats_tick >= CONFIG_CAN_STATS_PERIOD_MS) {
                 last_stats_tick = now;
@@ -806,7 +833,16 @@ static void zenoh_engine_task(void const *arg) {
                     }
                 }
 
-                HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, (boff || pass || timeout_alert) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+                /* Red LED (LD3) indicates true Bus-Off; on timeout/passive, blink gently so user knows MCU is alive */
+                static bool alert_toggle = false;
+                alert_toggle = !alert_toggle;
+                if (boff) {
+                    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
+                } else if (pass || timeout_alert) {
+                    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, alert_toggle ? GPIO_PIN_SET : GPIO_PIN_RESET);
+                } else {
+                    HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+                }
 
                 printf("[Stats] CAN->ROS: %lu | ROS->CAN: %lu | RX_f:%lu TX_f:%lu | TEC:%u REC:%u LEC:%s(%u)%s%s | DROP:%lu\r\n",
                        (unsigned long)g_bridge.can_to_zenoh_count, (unsigned long)g_bridge.zenoh_to_can_count,
