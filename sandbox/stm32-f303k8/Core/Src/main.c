@@ -231,6 +231,7 @@ int main(void)
     static bool has_gyro = false;
 
     if (bno_data_ready) {
+      printf("[INFO] BNO085 data ready interrupt received\r\n");
       bno_data_ready = false;
     
       if (bno08x_get_sensor_event(&sensor_value))
@@ -251,27 +252,32 @@ int main(void)
     
     static uint32_t last_tick = 0;
     uint32_t now = HAL_GetTick();
-    if (now - last_tick >= BNO085_CAN_BNO085_DATA_CYCLE_TIME_MS && (has_accel || has_gyro))
+    if (now - last_tick >= BNO085_CAN_BNO085_DATA_CYCLE_TIME_MS)
     {
+      if (!has_accel || !has_gyro)
+      {
+        printf("[WARN] Missing sensor data: has_accel=%d has_gyro=%d\r\n", has_accel, has_gyro);
+        last_tick = now;
+        continue;
+      }
+      //メールボックスに空きがあるか確認 
+      if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) > 0)
+      {
         last_tick = now;
         can_send(&last_gyro, &last_accel, &hcan);
+          // [OK] Sent CAN message の printf に TSR と ESR を追加するイメージ
+          printf("[OK] Sent CAN: acc=%u gyr=%u TSR=0x%08lX ESR=0x%08lX\r\n",
+          last_accel.sequence, last_gyro.sequence,
+          hcan.Instance->TSR, hcan.Instance->ESR);
         has_accel = false;
         has_gyro = false;
         //CAN_LoopbackRecieve(&hcan);
-// //メールボックスに空きがあるか確認 
-//       if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) > 0)
-//       {
-//         last_tick = now;
-//         can_send(&last_gyro, &last_accel, &hcan);
-//         has_accel = false;
-//         has_gyro = false;
-//         //CAN_LoopbackRecieve(&hcan);
-//       }
-//       else
-//       {
-//         // 送信メールボックスが詰まっている（相手がACKを返していない等）場合の警告 
-//         printf("[WARN] CAN Tx Mailbox Full!\r\n");
-//       }
+      }
+      else
+      {
+        // 送信メールボックスが詰まっている（相手がACKを返していない等）場合の警告 
+        printf("[WARN] CAN Tx Mailbox Full!\r\n");
+      }
     }
   }
   /* USER CODE END 3 */
