@@ -36,17 +36,17 @@ BS_:
 BU_: STM32 PC
 
 BO_ 256 BNO085_Data: 8 STM32
- SG_ Accel_X : 0|16@1- (1,0) [-32768|32767] "m/s^2" PC
- SG_ Accel_Y : 16|16@1- (1,0) [-32768|32767] "m/s^2" PC
+ SG_ Accel_X : 0|16@1- (0.00390625,0) [-128|127.99609375] "m/s^2" PC
+ SG_ Accel_Y : 16|16@1- (0.00390625,0) [-128|127.99609375] "m/s^2" PC
  SG_ Accel_Seq : 32|8@1+ (1,0) [0|255] "" PC
- SG_ Gyro_Z : 40|16@1- (1,0) [-32768|32767] "rad/s" PC
+ SG_ Gyro_Z : 40|16@1- (0.001953125,0) [-64|63.998046875] "rad/s" PC
  SG_ Gyro_Seq : 56|8@1+ (1,0) [0|255] "" PC
 
 CM_ BO_ 256 "BNO085 accelerometer X/Y, gyroscope Z, and sequence numbers";
-CM_ SG_ 256 Accel_X "X軸加速度 (2byte signed int16)";
-CM_ SG_ 256 Accel_Y "Y軸加速度 (2byte signed int16)";
+CM_ SG_ 256 Accel_X "X軸加速度 (Q8固定小数点, 1/256 m/s^2)";
+CM_ SG_ 256 Accel_Y "Y軸加速度 (Q8固定小数点, 1/256 m/s^2)";
 CM_ SG_ 256 Accel_Seq "加速度センサのシーケンス番号 (1byte uint8)";
-CM_ SG_ 256 Gyro_Z "Z軸角速度 / Yawレート (2byte signed int16)";
+CM_ SG_ 256 Gyro_Z "Z軸角速度 / Yawレート (Q9固定小数点, 1/512 rad/s)";
 CM_ SG_ 256 Gyro_Seq "ジャイロセンサのシーケンス番号 (1byte uint8)";
 
 BA_DEF_ BO_ "GenMsgCycleTime" INT 0 65535;

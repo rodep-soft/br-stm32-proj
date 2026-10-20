@@ -35,14 +35,6 @@ void can_send(sh2_SensorValue_t *gyro, sh2_SensorValue_t *accel, CAN_HandleTypeD
   tx_header.RTR   = CAN_RTR_DATA;
   tx_header.DLC   = BNO085_CAN_BNO085_DATA_LENGTH;
 
-//   printf("CAN TX: ID=0x%03lX DLC=%lu DATA=",
-//          (unsigned long)tx_header.StdId, (unsigned long)tx_header.DLC);
-//   for (uint32_t i = 0; i < tx_header.DLC; i++)
-//   {
-//     printf("%02X ", tx_data[i]);
-//   }
-//   printf("\r\n");
-
   status = HAL_CAN_AddTxMessage(hcan, &tx_header, tx_data, &tx_mailbox);
   if (status != HAL_OK)
   {
@@ -96,8 +88,12 @@ void CAN_LoopbackRecieve(CAN_HandleTypeDef *hcan)
          (unsigned long)rx_header.StdId,
          (rx_header.IDE == CAN_ID_STD) ? "STD" : "EXT",
          (unsigned long)rx_header.DLC);
-  printf("accel_x=%d accel_y=%d accel_seq=%u gyro_z=%d gyro_seq=%u",
-         rx_msg.accel_x, rx_msg.accel_y, rx_msg.accel_seq, rx_msg.gyro_z, rx_msg.gyro_seq);
+  printf("accel_x=%.4f accel_y=%.4f accel_seq=%u gyro_z=%.4f gyro_seq=%u",
+         bno085_can_bno085_data_accel_x_decode(rx_msg.accel_x),
+         bno085_can_bno085_data_accel_y_decode(rx_msg.accel_y),
+         rx_msg.accel_seq,
+         bno085_can_bno085_data_gyro_z_decode(rx_msg.gyro_z),
+         rx_msg.gyro_seq);
   
   // for (uint32_t i = 0; i < rx_header.DLC; i++)
   // {

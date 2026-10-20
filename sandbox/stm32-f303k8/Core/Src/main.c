@@ -204,7 +204,6 @@ int main(void)
         int retry_status = bno08x_init();
         if (retry_status == 0)
         {
-
           printf("[OK] BNO085 Recovered & Initialized!\r\n");
           bno08x_enable_report(SH2_ACCELEROMETER, 5000);
           bno08x_enable_report(SH2_GYROSCOPE_CALIBRATED, 5000);
@@ -237,11 +236,8 @@ int main(void)
       if (bno08x_get_sensor_event(&sensor_value))
       {
 
-        //printf("[DEBUG]: %ld", last_accel[0]);
-
         if (sensor_value.sensorId == SH2_ACCELEROMETER)
         {
-  //        printf("[DEBUG]: ACCEL RECEIVED\n");
           last_accel = sensor_value;
           has_accel = true;
         }
@@ -249,35 +245,33 @@ int main(void)
         {
           last_gyro = sensor_value;
           has_gyro = true;
-
-          //last_sensor_data.gyro_z = sensor_value.un.gyroscope.z;
-          //last_sensor_data.timestamp = sensor_value.timestamp;
-        }
-
-        static uint32_t last_print = 0;
-        uint32_t now = HAL_GetTick();
-        if ((now - last_print) >= 200)
-        {
-          last_print = now;
-          if (has_accel || has_gyro)
-          {
-            // printf("ACC[m/s^2]: X=%+6.2f, Y=%+6.2f, Z=%+6.2f | GYR[rad/s]: X=%+6.2f, Y=%+6.2f, Z=%+6.2f\r\n",
-            //        last_accel[0], last_accel[1], last_accel[2],
-            //        last_gyro[0], last_gyro[1], last_gyro[2])
-            // printf("ACC[m/s^2]: X=%f, Y=%f, Z=%f, timestamp=%lu, seqnum=%lu\r\n",
-            //        last_accel.un.accelerometer.x, last_accel.un.accelerometer.y, last_accel.un.accelerometer.z, last_accel.timestamp, last_accel.sequence);
-          }
         }
       }
     }
     
     static uint32_t last_tick = 0;
     uint32_t now = HAL_GetTick();
-    if (now - last_tick >= BNO085_CAN_BNO085_DATA_CYCLE_TIME_MS)
+    if (now - last_tick >= BNO085_CAN_BNO085_DATA_CYCLE_TIME_MS && (has_accel || has_gyro))
     {
-      last_tick = now;
-      can_send(&last_gyro, &last_accel, &hcan);
-      CAN_LoopbackRecieve(&hcan);
+        last_tick = now;
+        can_send(&last_gyro, &last_accel, &hcan);
+        has_accel = false;
+        has_gyro = false;
+        //CAN_LoopbackRecieve(&hcan);
+// //メールボックスに空きがあるか確認 
+//       if (HAL_CAN_GetTxMailboxesFreeLevel(&hcan) > 0)
+//       {
+//         last_tick = now;
+//         can_send(&last_gyro, &last_accel, &hcan);
+//         has_accel = false;
+//         has_gyro = false;
+//         //CAN_LoopbackRecieve(&hcan);
+//       }
+//       else
+//       {
+//         // 送信メールボックスが詰まっている（相手がACKを返していない等）場合の警告 
+//         printf("[WARN] CAN Tx Mailbox Full!\r\n");
+//       }
     }
   }
   /* USER CODE END 3 */
@@ -298,7 +292,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -308,12 +304,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }
@@ -335,15 +331,15 @@ static void MX_CAN_Init(void)
 
   /* USER CODE END CAN_Init 1 */
   hcan.Instance = CAN;
-  hcan.Init.Prescaler = 4;
-  hcan.Init.Mode = CAN_MODE_LOOPBACK;
+  hcan.Init.Prescaler = 2;
+  hcan.Init.Mode = CAN_MODE_NORMAL;
   hcan.Init.SyncJumpWidth = CAN_SJW_1TQ;
-  hcan.Init.TimeSeg1 = CAN_BS1_2TQ;
-  hcan.Init.TimeSeg2 = CAN_BS2_1TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_13TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_2TQ;
   hcan.Init.TimeTriggeredMode = DISABLE;
   hcan.Init.AutoBusOff = ENABLE;
   hcan.Init.AutoWakeUp = DISABLE;
-  hcan.Init.AutoRetransmission = DISABLE;
+  hcan.Init.AutoRetransmission = ENABLE;
   hcan.Init.ReceiveFifoLocked = DISABLE;
   hcan.Init.TransmitFifoPriority = DISABLE;
   if (HAL_CAN_Init(&hcan) != HAL_OK)
@@ -379,7 +375,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
   hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
