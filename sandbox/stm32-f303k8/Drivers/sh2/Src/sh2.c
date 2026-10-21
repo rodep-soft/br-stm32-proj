@@ -495,12 +495,11 @@ static int opStart(sh2_t *pSh2, const sh2_Op_t *pOp)
     // return error if another operation already in progress
     if (pSh2->pOp) return SH2_ERR_OP_IN_PROGRESS;
 
-    printf("opStart: starting operation\r\n");
     // Establish this operation as the new operation in progress
     pSh2->pOp = pOp;
     pSh2->opStatus = SH2_OK;
     int rc = pOp->start(pSh2);  // Call start method
-    printf("opStart: start method returned %d\r\n", rc);
+
     if (rc != SH2_OK) {
         // Unregister this operation
         pSh2->opStatus = rc;
@@ -630,7 +629,6 @@ static void sensorhubControlHdlr(void *cookie, uint8_t *payload, uint16_t len, u
 
 static int opProcess(sh2_t *pSh2, const sh2_Op_t *pOp)
 {
-    printf("opProcess: start\r\n");
     int status = SH2_OK;
     uint32_t start_us = 0;
 
@@ -638,7 +636,7 @@ static int opProcess(sh2_t *pSh2, const sh2_Op_t *pOp)
     
     status = opStart(pSh2, pOp);
     if (status != SH2_OK) {
-        printf("opProcess: opStart failed, status=%d\r\n", status);
+
         return status;
     }
     uint32_t now_us = start_us;
@@ -649,7 +647,7 @@ static int opProcess(sh2_t *pSh2, const sh2_Op_t *pOp)
 
         if (pSh2->pShtp == 0) {
             // Was SH2 interface closed unexpectedly?
-            printf("SH2 interface closed unexpectedly!\r\n");
+  
             pSh2->opStatus = SH2_ERR;
             break;
         }
@@ -666,7 +664,6 @@ static int opProcess(sh2_t *pSh2, const sh2_Op_t *pOp)
         pSh2->pOp = 0;
         pSh2->opStatus = SH2_ERR_TIMEOUT;
     }
-    printf("opProcess: status=%d\r\n", pSh2->opStatus);
     return pSh2->opStatus;
 }
 

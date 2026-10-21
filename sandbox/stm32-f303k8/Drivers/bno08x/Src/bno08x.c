@@ -45,7 +45,7 @@ int bno08x_init(void)
 
     // 接続確認のため製品IDを取得
     memset(&prod_ids, 0, sizeof(prod_ids));
-    printf("Requesting Product IDs...\r\n");
+    // printf("Requesting Product IDs...\r\n");
 
     status = sh2_getProdIds(&prod_ids);
     if (status != SH2_OK) {

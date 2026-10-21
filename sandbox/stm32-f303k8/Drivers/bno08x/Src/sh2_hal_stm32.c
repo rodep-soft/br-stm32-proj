@@ -55,7 +55,7 @@ static int hal_open(sh2_Hal_t *self)
         return -1;
     }
 
-    printf("[OPEN] Reset OK: INT went LOW in %lu ms (SPI Mode Locked)\r\n", HAL_GetTick() - start);
+    //printf("[OPEN] Reset OK: INT went LOW in %lu ms (SPI Mode Locked)\r\n", HAL_GetTick() - start);
     return 0;
 }
 

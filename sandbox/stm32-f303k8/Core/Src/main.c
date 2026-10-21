@@ -231,7 +231,7 @@ int main(void)
     static bool has_gyro = false;
 
     if (bno_data_ready) {
-      printf("[INFO] BNO085 data ready interrupt received\r\n");
+      // printf("[INFO] BNO085 data ready interrupt received\r\n");
       bno_data_ready = false;
     
       if (bno08x_get_sensor_event(&sensor_value))
@@ -256,7 +256,7 @@ int main(void)
     {
       if (!has_accel || !has_gyro)
       {
-        printf("[WARN] Missing sensor data: has_accel=%d has_gyro=%d\r\n", has_accel, has_gyro);
+        //printf("[WARN] Missing sensor data: has_accel=%d has_gyro=%d\r\n", has_accel, has_gyro);
         last_tick = now;
         continue;
       }
@@ -266,9 +266,9 @@ int main(void)
         last_tick = now;
         can_send(&last_gyro, &last_accel, &hcan);
           // [OK] Sent CAN message の printf に TSR と ESR を追加するイメージ
-          printf("[OK] Sent CAN: acc=%u gyr=%u TSR=0x%08lX ESR=0x%08lX\r\n",
-          last_accel.sequence, last_gyro.sequence,
-          hcan.Instance->TSR, hcan.Instance->ESR);
+          // printf("[OK] Sent CAN: acc=%u gyr=%u TSR=0x%08lX ESR=0x%08lX\r\n",
+          // last_accel.sequence, last_gyro.sequence,
+          // hcan.Instance->TSR, hcan.Instance->ESR);
         has_accel = false;
         has_gyro = false;
         //CAN_LoopbackRecieve(&hcan);
@@ -276,7 +276,7 @@ int main(void)
       else
       {
         // 送信メールボックスが詰まっている（相手がACKを返していない等）場合の警告 
-        printf("[WARN] CAN Tx Mailbox Full!\r\n");
+        // printf("[WARN] CAN Tx Mailbox Full!\r\n");
       }
     }
   }
