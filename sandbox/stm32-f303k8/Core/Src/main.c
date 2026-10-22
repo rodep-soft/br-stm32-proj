@@ -29,6 +29,7 @@
 #include "bno08x.h"
 #include "bno085_can.h"
 #include "can.h"
+#include "dma.h"
 
 /* USER CODE END Includes */
 
@@ -52,11 +53,13 @@ CAN_HandleTypeDef hcan;
 
 SPI_HandleTypeDef hspi1;
 DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 volatile bool bno_data_ready = false;
+volatile bool bno_initialized = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -156,7 +159,8 @@ int main(void)
     }
   }
 
-  bool bno_initialized = false;
+  bno_initialized = false;
+  bno_dma_set_mode(false);
 
   printf("Initializing BNO085...\r\n");
   int init_status = bno08x_init();
@@ -172,8 +176,9 @@ int main(void)
 
     printf("!!!!!!![OK] Accelerometer config: sensitivity=%f, reportInterval_us=%u\r\n", config.changeSensitivity, config.reportInterval_us);
 
-    //printf("[OK] Enabled Accelerometer & Gyroscope reports (5ms)\r\n");
+    // 初期化・レポート設定がすべて完了したらDMAモードを有効化する
     bno_initialized = true;
+    bno_dma_set_mode(true);
   }
   else
   {
@@ -200,6 +205,7 @@ int main(void)
       if ((now - last_retry) >= 1000)
       {
         last_retry = now;
+        bno_dma_set_mode(false);
         printf("Retrying BNO085 initialization...\r\n");
         int retry_status = bno08x_init();
         if (retry_status == 0)
@@ -209,6 +215,7 @@ int main(void)
           bno08x_enable_report(SH2_GYROSCOPE_CALIBRATED, 5000);
           printf("[OK] Enabled Accelerometer & Gyroscope reports (5ms)\r\n");
           bno_initialized = true;
+          bno_dma_set_mode(true);
         }
         else
         {
@@ -222,18 +229,28 @@ int main(void)
 
     if (bno08x_was_reset())
     {
-      printf("[WARN] BNO085 reset detected! Re-enabling reports...\r\n");
+      // printf("[WARN] BNO085 reset detected! Re-enabling reports...\r\n");
+      bno_initialized = false;
+      bno_dma_set_mode(false);
       bno08x_enable_report(SH2_ACCELEROMETER, 5000);
       bno08x_enable_report(SH2_GYROSCOPE_CALIBRATED, 5000);
+      bno_initialized = true;
+      bno_dma_set_mode(true);
+    }
+
+    // DMA転送がタイムアウトしていた場合はDMAを強制停止してフラグを下ろす
+    if (bno_dma_check_timeout(BNO_DMA_TIMEOUT_MS))
+    {
+      bno_data_ready = false;
     }
 
     static bool has_accel = false;
     static bool has_gyro = false;
 
     if (bno_data_ready) {
-      // printf("[INFO] BNO085 data ready interrupt received\r\n");
+      // DMA受信完了済みのRAMバッファからイベントをデコードする
       bno_data_ready = false;
-    
+
       if (bno08x_get_sensor_event(&sensor_value))
       {
 
@@ -256,7 +273,7 @@ int main(void)
     {
       if (!has_accel || !has_gyro)
       {
-        //printf("[WARN] Missing sensor data: has_accel=%d has_gyro=%d\r\n", has_accel, has_gyro);
+        // printf("[WARN] Missing sensor data: has_accel=%d has_gyro=%d\r\n", has_accel, has_gyro);
         last_tick = now;
         continue;
       }
@@ -265,7 +282,7 @@ int main(void)
       {
         last_tick = now;
         can_send(&last_gyro, &last_accel, &hcan);
-          // [OK] Sent CAN message の printf に TSR と ESR を追加するイメージ
+          // // [OK] Sent CAN message の printf に TSR と ESR を追加するイメージ
           // printf("[OK] Sent CAN: acc=%u gyr=%u TSR=0x%08lX ESR=0x%08lX\r\n",
           // last_accel.sequence, last_gyro.sequence,
           // hcan.Instance->TSR, hcan.Instance->ESR);
@@ -446,6 +463,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel2_IRQn);
+  /* DMA1_Channel3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel3_IRQn);
 
 }
 
@@ -505,7 +525,31 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if (GPIO_Pin == GPIO_PIN_0)
   {
+    // 初期化完了後はEXTI割り込みの段階で1段階DMA受信を開始する
+    if (bno_initialized)
+    {
+      bno_dma_start();
+    }
+  }
+}
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+  if (hspi->Instance == SPI1)
+  {
+    // DMA受信完了: CSをHIGHに戻し、メインループにデータ準備完了を通知する
+    bno_dma_finish();
     bno_data_ready = true;
+  }
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+  if (hspi->Instance == SPI1)
+  {
+    // SPI DMAエラー発生時はDMAを強制停止してフラグを下ろす
+    bno_dma_abort();
+    bno_data_ready = false;
   }
 }
 /* USER CODE END 4 */

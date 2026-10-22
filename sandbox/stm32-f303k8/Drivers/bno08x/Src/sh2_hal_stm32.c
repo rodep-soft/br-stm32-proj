@@ -1,4 +1,5 @@
 #include "sh2_hal_stm32.h"
+#include "dma.h"
 #include "stm32f3xx_hal.h"
 #include <string.h>
 #include <stdbool.h>
@@ -75,6 +76,12 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
     (void)self;
     uint16_t packet_size = 0;
 
+    // --- DMAモード有効時：すでにDMAでRAMに読み込まれたデータを渡す (Core/Src/dma.c) ---
+    if (bno_dma_is_enabled()) {
+        return bno_dma_read_packet(pBuffer, len, t_us);
+    }
+
+    // --- 初期化・設定中（DMAモード無効時）：従来のブロッキングSPI通信 ---
     // 受信データがない（INTピンがHIGH）場合は即座に0を返す
     if (!BNO_INT_IS_LOW()) {
         return 0;

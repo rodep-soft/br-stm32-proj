@@ -1,7 +1,0 @@
-../Drivers/bno08x/Src/bno08x.c:10:13:async_event_handler	3
-../Drivers/bno08x/Src/bno08x.c:18:13:sensor_event_handler	4
-../Drivers/bno08x/Src/bno08x.c:28:5:bno08x_init	5
-../Drivers/bno08x/Src/bno08x.c:74:6:bno08x_enable_report	1
-../Drivers/bno08x/Src/bno08x.c:93:6:bno08x_service	1
-../Drivers/bno08x/Src/bno08x.c:98:6:bno08x_get_sensor_event	4
-../Drivers/bno08x/Src/bno08x.c:116:6:bno08x_was_reset	1

@@ -47,6 +47,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/can.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Src/dma.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/bno08x/Src/sh2_hal_stm32.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/bno08x/Src/bno08x.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/sh2/Src/euler.c
