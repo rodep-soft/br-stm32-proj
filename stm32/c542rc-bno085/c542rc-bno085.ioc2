@@ -3641,7 +3641,7 @@ solution:
               "basic": {
                 "mode": "NORMAL",
                 "frame_format": "CLASSIC_CAN",
-                "auto_retransmission": true,
+                "auto_retransmission": false,
                 "transmit_pause": false,
                 "protocol_exception": true,
                 "tx_fifo_queue_mode": "FIFO",

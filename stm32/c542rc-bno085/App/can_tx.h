@@ -6,4 +6,5 @@
 void can_tx_service(uint32_t now_ms, bool invalidate);
 bool can_tx_send(const uint8_t payload[8], uint32_t oldest_sample_ms);
 extern volatile uint32_t can_queued_frames, can_tx_failures, can_expired_frames, can_sent_frames;
+extern volatile uint32_t can_unsent_frames;
 #endif

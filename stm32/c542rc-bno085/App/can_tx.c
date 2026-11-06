@@ -5,6 +5,7 @@
 static uint32_t pending_buffer, sample_ms;
 static bool abort_requested;
 volatile uint32_t can_queued_frames, can_tx_failures, can_expired_frames, can_sent_frames;
+volatile uint32_t can_unsent_frames;
 
 void can_tx_service(uint32_t now_ms, bool invalidate)
 {
@@ -14,7 +15,10 @@ void can_tx_service(uint32_t now_ms, bool invalidate)
         /* TXBTO distinguishes actual completion from cancellation, including a
            frame which finished just as its cancellation was requested. */
         if (FDCAN1->TXBTO & pending_buffer) can_sent_frames++;
-        else can_expired_frames++;
+        else if (abort_requested) can_expired_frames++;
+        /* DAR releases unsuccessful attempts (ACK/error/arbitration loss).
+           Do not hold the next fresh sample until the age deadline. */
+        else can_unsent_frames++;
         pending_buffer = 0;
         abort_requested = false;
         return;

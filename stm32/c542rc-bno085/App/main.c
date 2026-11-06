@@ -224,12 +224,13 @@ int main(void)
         }
         if ((uint32_t)(now - last_status) >= 5000U) {
             last_status = now;
-            printf("Health ms=%lu online=%u a=%lu g=%lu acc=%lu/%lu sent=%lu expired=%lu "
+            printf("Health ms=%lu online=%u a=%lu g=%lu acc=%lu/%lu sent=%lu expired=%lu queued=%lu unsent=%lu "
                    "busoff=%lu lec=%lu psr=%08lx ecr=%08lx stale=%lu invalid=%lu "
                    "initfail=%lu recover=%lu spi=%u uart=%lu drop=%lu stack_free=%lu\r\n",
                    (unsigned long)now, (unsigned)online, (unsigned long)accel_reports,
                    (unsigned long)gyro_reports, (unsigned long)accel_accuracy, (unsigned long)gyro_accuracy,
                    (unsigned long)can_sent_frames, (unsigned long)can_expired_frames,
+                   (unsigned long)can_queued_frames, (unsigned long)can_unsent_frames,
                    (unsigned long)can_bus_off_events, (unsigned long)can_last_error,
                    (unsigned long)can_protocol_status, (unsigned long)can_error_counters,
                    (unsigned long)imu_stale_reports, (unsigned long)imu_invalid_reports,

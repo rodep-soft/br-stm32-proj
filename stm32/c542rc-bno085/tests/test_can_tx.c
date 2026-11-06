@@ -48,5 +48,18 @@ int main(void)
     can_tx_service(79, false); assert(aborts == 3 && can_tx_failures == 2);
     abort_status = HAL_OK;
     can_tx_service(80, false); assert(aborts == 4);
-    puts("PASS: CAN expiry, invalidation, pending cancellation, completion race and tick wrap");
+    pending = 0; can_tx_service(81, false);
+    assert(can_expired_frames == 2);
+
+    /* DAR ends an unsuccessful attempt without a software abort. A new sample
+       can be queued at the next 5 ms slot instead of waiting 100 ms. */
+    now = 2000;
+    assert(can_tx_send(data, now));
+    pending = 0; can_tx_service(now + 1, false);
+    assert(can_unsent_frames == 1 && can_expired_frames == 2 && aborts == 4);
+    now += 5;
+    assert(can_tx_send(data, now));
+    pending = 0; mock_fdcan.TXBTO = 2; can_tx_service(now + 1, false);
+    assert(can_sent_frames == 2 && can_unsent_frames == 1);
+    puts("PASS: CAN one-shot failure release, expiry, invalidation, completion race and tick wrap");
 }

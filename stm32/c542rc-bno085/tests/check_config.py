@@ -17,6 +17,8 @@ assert "HAL_RCC_PCLK_PRESCALER1" in rcc
 assert "HAL_RCC_FDCAN_CLK_SRC_PCLK1" in can
 assert "HAL_FDCAN_FRAME_FORMAT_CLASSIC_CAN" in can
 assert "HAL_FDCAN_MODE_NORMAL" in can
+assert "HAL_FDCAN_AUTO_RETRANSMISSION_DISABLE" in can
+assert '"auto_retransmission": false' in (root / "c542rc-bno085.ioc2").read_text()
 assert "HAL_FDCAN_CLOCK_DIV_1" in can
 def timing(name):
     return int(re.search(rf"\.{name}\s*=\s*(\d+)", can).group(1))

@@ -70,7 +70,7 @@ hal_fdcan_handle_t *mx_fdcan1_init(void)
 
   fdcan_config.frame_format         = HAL_FDCAN_FRAME_FORMAT_CLASSIC_CAN;
   fdcan_config.mode                 = HAL_FDCAN_MODE_NORMAL;
-  fdcan_config.auto_retransmission  = HAL_FDCAN_AUTO_RETRANSMISSION_ENABLE;
+  fdcan_config.auto_retransmission  = HAL_FDCAN_AUTO_RETRANSMISSION_DISABLE;
   fdcan_config.transmit_pause       = HAL_FDCAN_TRANSMIT_PAUSE_DISABLE;
   fdcan_config.protocol_exception   = HAL_FDCAN_PROTOCOL_EXCEPTION_ENABLE;
   fdcan_config.std_filters_nbr      = 0U;
