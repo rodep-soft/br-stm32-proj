@@ -1,5 +1,5 @@
 # file-format: 1.0.0
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 set(CMAKE_C_COMPILER_FORCED TRUE)
@@ -43,3 +43,5 @@ target_link_directories(${CMAKE_PROJECT_NAME} PUBLIC
 target_link_libraries(${CMAKE_PROJECT_NAME} PUBLIC
   # Add additional linker libraries here
 )
+
+include(${CMAKE_CURRENT_LIST_DIR}/../cmake/application.cmake)

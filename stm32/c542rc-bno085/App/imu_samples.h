@@ -12,6 +12,7 @@
 typedef struct {
     struct bno085_can_bno085_data_t data;
     uint32_t accel_ms, gyro_ms;
+    uint8_t accel_seq, gyro_seq;
     bool accel_seen, gyro_seen;
     bool accel_pending, gyro_pending;
 } imu_samples_t;
@@ -21,7 +22,8 @@ void imu_samples_reset(imu_samples_t *samples);
 void imu_samples_update(imu_samples_t *samples, const sh2_SensorValue_t *value,
                         uint32_t now_ms, uint32_t now_us);
 extern volatile uint32_t imu_stale_reports, imu_invalid_reports;
-bool imu_samples_pack(const imu_samples_t *samples, uint32_t now_ms, uint8_t data[8]);
+bool imu_samples_pack(const imu_samples_t *samples, uint32_t now_ms,
+                      uint8_t data[BNO085_CAN_BNO085_DATA_LENGTH]);
 void imu_samples_sent(imu_samples_t *samples);
 
 #endif

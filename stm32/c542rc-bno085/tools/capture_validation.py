@@ -88,7 +88,7 @@ def main():
                     if len(buffer) < 7:
                         break
                     dlc = buffer[6]
-                    if dlc > 8:
+                    if dlc > 64:
                         malformed += 1
                         del buffer[0]
                         continue
@@ -103,10 +103,13 @@ def main():
                     del buffer[:size]
                     idraw = packet[2:6].hex()
                     ids[idraw] += 1
-                    if idraw not in ('00000004', '20000000') or dlc != 8:
+                    if idraw not in ('00000014', 'a0000000') or dlc not in (18, 20):
                         continue
-                    ax, ay, aseq, gz, gseq = struct.unpack('<hhBhB', packet[7:15])
-                    rows.append([elapsed, '0x100', idraw, packet[7:15].hex(), ax/256, ay/256, aseq, gz/512, gseq])
+                    ts_ms, seq, status, ax, ay, az, gx, gy, gz = struct.unpack('<IBBhhhhhh', packet[7:25])
+                    rows.append([elapsed, '0x500', idraw, packet[7:7+dlc].hex(),
+                                 ts_ms, seq, status,
+                                 ax * 0.001, ay * 0.001, az * 0.001,
+                                 gx * 0.001, gy * 0.001, gz * 0.001])
         capture_seconds = time.monotonic() - start
     finally:
         os.close(can_fd)
@@ -117,7 +120,9 @@ def main():
         with prefix.with_suffix('.csv').open('w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['host_elapsed_s', 'can_id', 'adapter_id_raw', 'payload_hex',
-                             'Accel_X_m_s2', 'Accel_Y_m_s2', 'Accel_Seq', 'Gyro_Z_rad_s', 'Gyro_Seq'])
+                             'Timestamp_Ms', 'Seq', 'Status',
+                             'Accel_X_m_s2', 'Accel_Y_m_s2', 'Accel_Z_m_s2',
+                             'Gyro_X_rad_s', 'Gyro_Y_rad_s', 'Gyro_Z_rad_s'])
             writer.writerows(rows)
     log = uart.decode(errors='replace')
     for line in log.splitlines():
@@ -128,7 +133,7 @@ def main():
                   raw_id_counts=dict(ids), malformed_packets=malformed,
                   approx_hz=(len(rows)-1)/(rows[-1][0]-rows[0][0]) if len(rows) > 1 else 0,
                   max_host_gap_s=max(gaps, default=0),
-                  gyro_seq_steps=dict(collections.Counter((b[8]-a[8]) % 256 for a, b in zip(rows, rows[1:]))),
+                  seq_steps=dict(collections.Counter((b[5]-a[5]) % 256 for a, b in zip(rows, rows[1:]))),
                   boot_banners=log.count('NUCLEO-C542RC BNO085 SPI-to-CAN'),
                   watchdog_reset_logs=log.count('IWDG=1;'),
                   health=health, csv=str(prefix.with_suffix('.csv')), uart_log=str(prefix.with_suffix('.uart.log')))

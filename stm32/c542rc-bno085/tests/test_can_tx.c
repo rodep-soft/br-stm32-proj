@@ -15,14 +15,17 @@ int HAL_FDCAN_GetTxFifoFreeLevel(const hal_fdcan_handle_t *h) { (void)h; return 
 int HAL_FDCAN_ReqTransmitMsgFromFIFOQ(hal_fdcan_handle_t *h, const hal_fdcan_tx_header_t *header, const uint8_t *data)
 {
     (void)h; (void)data;
-    assert(header->b.identifier == 0x100 && header->b.data_length == 8);
+    assert(header->b.identifier == 0x500 &&
+           header->b.data_length == HAL_FDCAN_DATA_LEN_FDCAN_20_BYTE &&
+           header->b.frame_format == HAL_FDCAN_HEADER_FRAME_FORMAT_FD_CAN &&
+           header->b.bit_rate_switch == HAL_FDCAN_BIT_RATE_SWITCH_OFF);
     if (send_status) return send_status;
     pending = 2; mock_fdcan.TXBTO = 0; return HAL_OK;
 }
 uint32_t HAL_FDCAN_GetLatestTxFifoQRequestBuffer(const hal_fdcan_handle_t *h) { (void)h; return 2; }
 int main(void)
 {
-    uint8_t data[8] = {0};
+    uint8_t data[BNO085_CAN_BNO085_DATA_LENGTH] = {0};
     now = 1000;
     assert(!can_tx_send(data, 900)); /* Already stale. */
     send_status = HAL_ERROR;
@@ -61,5 +64,5 @@ int main(void)
     assert(can_tx_send(data, now));
     pending = 0; mock_fdcan.TXBTO = 2; can_tx_service(now + 1, false);
     assert(can_sent_frames == 2 && can_unsent_frames == 1);
-    puts("PASS: CAN one-shot failure release, expiry, invalidation, completion race and tick wrap");
+    puts("PASS: CAN FD one-shot failure release, expiry, invalidation, completion race and tick wrap");
 }

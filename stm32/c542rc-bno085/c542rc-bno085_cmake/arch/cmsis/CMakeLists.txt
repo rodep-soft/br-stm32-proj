@@ -1,7 +1,7 @@
 # origin-pack: STMicroelectronics::CMSIS@6.3.0
 # file-format: 1.0.0
 project(STMicroelectronics_CMSIS_6_3_0)
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28)
 add_library(STMicroelectronics_CMSIS_6_3_0 INTERFACE)
 
 # List of all CMSIS properties that influence conditions for this package

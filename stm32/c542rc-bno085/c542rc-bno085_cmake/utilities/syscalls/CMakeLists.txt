@@ -1,7 +1,7 @@
 # origin-pack: STMicroelectronics::syscalls@2.0.0
 # file-format: 1.0.0
 project(STMicroelectronics_syscalls_2_0_0)
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28)
 add_library(STMicroelectronics_syscalls_2_0_0 INTERFACE)
 
 # List of all CMSIS properties that influence conditions for this package

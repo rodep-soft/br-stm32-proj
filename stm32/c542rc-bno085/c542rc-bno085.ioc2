@@ -3640,7 +3640,7 @@ solution:
               },
               "basic": {
                 "mode": "NORMAL",
-                "frame_format": "CLASSIC_CAN",
+                "frame_format": "FD_NO_BRS",
                 "auto_retransmission": false,
                 "transmit_pause": false,
                 "protocol_exception": true,
@@ -4567,6 +4567,6 @@ project:
 }"""
 
 ["Project Description"]
-workingAreaId = "11d4ca06-1dad-47be-8a35-fe4d2a31024f"
+workingAreaId = "3b688e47-2987-4edc-b972-ab8da2f314b1"
 version = "1"
 mx2Version = "1.2.0"

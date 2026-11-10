@@ -1,32 +1,33 @@
 # c542rc-bno085
 
-NUCLEO-C542RC（STM32C542RCT6）でBNO085をSPI接続し、加速度X/Yと校正済み角速度ZをClassic CANへ送信するファームウェア。STM32 HAL2とSH-2/SHTPを使用する。
+NUCLEO-C542RC（STM32C542RCT6）でBNO085をSPI接続し、3軸加速度（X/Y/Z）と校正済み3軸角速度（X/Y/Z）をCAN FDへ送信するファームウェア。STM32 HAL2とSH-2/SHTPを使用する。
 
-## CAN仕様
+## CAN FD仕様
 
 | 項目 | 設定 |
 |---|---|
-| フレーム | Classic CAN、標準11 bit ID、データフレーム |
-| CAN ID | `0x100`（256） |
-| データ長 | 8 byte |
-| 通信速度 | 1 Mbps、BRSなし |
+| フレーム | CAN FD、標準11 bit ID、データフレーム |
+| CAN ID | `0x500`（1280） |
+| ペイロード長 | 18 byte（CAN FD DLC 20 byte、末尾2 byteは0パディング） |
+| 通信速度 | Nominal 1 Mbps、BRSなし（`FD_NO_BRS`） |
 | 送信要求間隔 | 最短5 ms（最大約200 Hz） |
 | 再送 | 自動再送なし（DAR）、最新値を単発送信 |
 | DBC | [`bno085_can.dbc`](bno085_can.dbc) |
 
-| バイト | 信号 | 型 | 物理値 |
+| オフセット | 信号 | 型 / サイズ | 内容・物理値 |
 |---|---|---|---|
-| 0–1 | Accel_X | int16、little endian | raw / 256 m/s² |
-| 2–3 | Accel_Y | int16、little endian | raw / 256 m/s² |
-| 4 | Accel_Seq | uint8 | 加速度レポートの連番（256で循環） |
-| 5–6 | Gyro_Z | int16、little endian | raw / 512 rad/s |
-| 7 | Gyro_Seq | uint8 | 角速度レポートの連番（256で循環） |
+| 0–3 | `timestamp_ms` | uint32 (4B), little endian | 起動からのミリ秒時刻（`HAL_GetTick()`） |
+| 4 | `seq` | uint8 (1B) | CAN送信フレームの連番（256で循環） |
+| 5 | `status` | uint8 (1B) | ステータス（`0=INIT`, `1=OK`, `2=WARN`, `3=ERROR`） |
+| 6–11 | `accel_x, y, z` | int16 × 3 (6B), little endian | raw × 0.001 m/s² |
+| 12–17 | `gyro_x, y, z` | int16 × 3 (6B), little endian | raw × 0.001 rad/s |
+| 18–19 | （パディング） | uint8 × 2 (2B) | `0x00`（20 byte DLC整合用） |
 
 - 前回の送信受付後に加速度・角速度の両方が更新され、未完了の送信がない場合に次を送信する。両者の計測時刻を一致させる処理はない。
 - ACK欠落・通信エラー・調停負けによる失敗時も同じデータを再送せず、次の送信枠で最新値へ進む。ACK検査とCANのエラー管理は有効。
 - 100 ms以上古いサンプル、未来時刻、NaN/Inf、表現範囲外の値は送信しない。未完了要求はサンプルの経過時間100 msで取消を要求する。
-- 固定5 ms周期や全サンプルの配送は保証しない。連番はCAN送信回数ではなくセンサーレポートの番号で、飛ぶ場合がある。
-- タイムスタンプ・精度ステータス・診断情報はCANに含めない。DBCとcodecはF303版と同一。
+- 固定5 ms周期や全サンプルの配送は保証しない。`seq`はCAN送信要求の受付ごとに1加算される。
+- PC側 `imu_can_decoder` の18バイトCAN FDフォーマットに対応する。
 
 FDCAN設定：kernel clock 144 MHz、分周1、prescaler 1、TSEG1=125、TSEG2=18、SJW=1、sample point 87.5%。
 

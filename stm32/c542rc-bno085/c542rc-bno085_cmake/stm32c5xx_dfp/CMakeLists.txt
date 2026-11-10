@@ -1,7 +1,7 @@
 # origin-pack: STMicroelectronics::stm32c5xx_dfp@2.1.0
 # file-format: 1.0.0
 project(STMicroelectronics_stm32c5xx_dfp_2_1_0)
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28)
 add_library(STMicroelectronics_stm32c5xx_dfp_2_1_0 INTERFACE)
 
 # List of all CMSIS properties that influence conditions for this package
@@ -811,9 +811,9 @@ endif()
 
 # Include RTE_Components.h globally if needed
 if(CMSIS_Tcompiler STREQUAL "IAR")
-    target_compile_options(STMicroelectronics_stm32c5xx_dfp_2_1_0 INTERFACE "SHELL:--preinclude $<QUOTE>${CMAKE_CURRENT_LIST_DIR}/RTE_Components.h$<QUOTE>")
+    target_compile_options(STMicroelectronics_stm32c5xx_dfp_2_1_0 INTERFACE "SHELL:--preinclude \"${CMAKE_CURRENT_LIST_DIR}/RTE_Components.h\"")
 else()
-    target_compile_options(STMicroelectronics_stm32c5xx_dfp_2_1_0 INTERFACE "SHELL:-include $<QUOTE>${CMAKE_CURRENT_LIST_DIR}/RTE_Components.h$<QUOTE>")
+    target_compile_options(STMicroelectronics_stm32c5xx_dfp_2_1_0 INTERFACE "SHELL:-include \"${CMAKE_CURRENT_LIST_DIR}/RTE_Components.h\"")
 endif()
 
 

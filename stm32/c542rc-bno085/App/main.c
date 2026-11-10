@@ -148,7 +148,7 @@ static bool start_sensor(void)
     }
     bno_init_stage = 8;
     bno_max_int_latency_us = 0; /* Measure steady operation separately from boot. */
-    printf("BNO085 ready (DMA): requested=5000us actual accel=%lu gyro=%lu us; CAN=0x100/8/1Mbps\r\n",
+    printf("BNO085 ready (DMA): requested=5000us actual accel=%lu gyro=%lu us; CANFD=0x500/18(20)/1Mbps\r\n",
            (unsigned long)accel_interval_us, (unsigned long)gyro_interval_us);
     return true;
 }
@@ -281,7 +281,7 @@ int main(void)
         }
 
         if ((uint32_t)(now - last_tx) >= BNO085_CAN_BNO085_DATA_CYCLE_TIME_MS) {
-            uint8_t payload[8];
+            uint8_t payload[BNO085_CAN_BNO085_DATA_LENGTH];
             uint32_t oldest_ms = (uint32_t)(now - samples.accel_ms) > (uint32_t)(now - samples.gyro_ms)
                                  ? samples.accel_ms : samples.gyro_ms;
             if (imu_samples_pack(&samples, now, payload) && can_tx_send(payload, oldest_ms)) {

@@ -1,7 +1,7 @@
 # origin-pack: STMicroelectronics::stm32c5xx_hal_drivers@2.1.0
 # file-format: 1.0.0
 project(STMicroelectronics_stm32c5xx_hal_drivers_2_1_0)
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.28)
 add_library(STMicroelectronics_stm32c5xx_hal_drivers_2_1_0 INTERFACE)
 
 # List of all CMSIS properties that influence conditions for this package

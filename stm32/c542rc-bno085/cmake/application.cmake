@@ -1,3 +1,8 @@
+if(DEFINED BNO_APPLICATION_INCLUDED)
+  return()
+endif()
+set(BNO_APPLICATION_INCLUDED TRUE)
+
 get_filename_component(BNO_APP_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 get_target_property(firmware_sources c542rc-bno085 SOURCES)
 list(FILTER firmware_sources EXCLUDE REGEX "(^|/)main\\.[ch]$")

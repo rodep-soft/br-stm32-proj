@@ -25,44 +25,57 @@ void imu_samples_update(imu_samples_t *s, const sh2_SensorValue_t *v,
     /* Round age upward: never extend the freshness deadline through rounding. */
     uint32_t sample_ms = now_ms - (age_us + 999U) / 1000U;
     if (v->sensorId == SH2_ACCELEROMETER) {
-        const float x = v->un.accelerometer.x, y = v->un.accelerometer.y;
-        if (!isfinite(x) || !isfinite(y) ||
+        const float x = v->un.accelerometer.x, y = v->un.accelerometer.y, z = v->un.accelerometer.z;
+        if (!isfinite(x) || !isfinite(y) || !isfinite(z) ||
             !bno085_can_bno085_data_accel_x_is_in_phys_range(x) ||
-            !bno085_can_bno085_data_accel_y_is_in_phys_range(y)) {
+            !bno085_can_bno085_data_accel_y_is_in_phys_range(y) ||
+            !bno085_can_bno085_data_accel_z_is_in_phys_range(z)) {
             s->accel_pending = false;
             imu_invalid_reports++;
             return;
         }
-        if (s->accel_seen && s->data.accel_seq == v->sequence) return;
+        if (s->accel_seen && s->accel_seq == v->sequence) return;
         s->data.accel_x = bno085_can_bno085_data_accel_x_encode(x);
         s->data.accel_y = bno085_can_bno085_data_accel_y_encode(y);
-        s->data.accel_seq = v->sequence;
+        s->data.accel_z = bno085_can_bno085_data_accel_z_encode(z);
+        s->accel_seq = v->sequence;
         s->accel_ms = sample_ms;
         s->accel_seen = s->accel_pending = true;
     } else if (v->sensorId == SH2_GYROSCOPE_CALIBRATED) {
-        const float z = v->un.gyroscope.z;
-        if (!isfinite(z) || !bno085_can_bno085_data_gyro_z_is_in_phys_range(z)) {
+        const float x = v->un.gyroscope.x, y = v->un.gyroscope.y, z = v->un.gyroscope.z;
+        if (!isfinite(x) || !isfinite(y) || !isfinite(z) ||
+            !bno085_can_bno085_data_gyro_x_is_in_phys_range(x) ||
+            !bno085_can_bno085_data_gyro_y_is_in_phys_range(y) ||
+            !bno085_can_bno085_data_gyro_z_is_in_phys_range(z)) {
             s->gyro_pending = false;
             imu_invalid_reports++;
             return;
         }
-        if (s->gyro_seen && s->data.gyro_seq == v->sequence) return;
+        if (s->gyro_seen && s->gyro_seq == v->sequence) return;
+        s->data.gyro_x = bno085_can_bno085_data_gyro_x_encode(x);
+        s->data.gyro_y = bno085_can_bno085_data_gyro_y_encode(y);
         s->data.gyro_z = bno085_can_bno085_data_gyro_z_encode(z);
-        s->data.gyro_seq = v->sequence;
+        s->gyro_seq = v->sequence;
         s->gyro_ms = sample_ms;
         s->gyro_seen = s->gyro_pending = true;
     }
 }
 
-bool imu_samples_pack(const imu_samples_t *s, uint32_t now_ms, uint8_t data[8])
+bool imu_samples_pack(const imu_samples_t *s, uint32_t now_ms,
+                      uint8_t data[BNO085_CAN_BNO085_DATA_LENGTH])
 {
     if (!s->accel_pending || !s->gyro_pending ||
         (uint32_t)(now_ms - s->accel_ms) >= IMU_MAX_SAMPLE_AGE_MS ||
         (uint32_t)(now_ms - s->gyro_ms) >= IMU_MAX_SAMPLE_AGE_MS) return false;
-    return bno085_can_bno085_data_pack(data, &s->data, 8) == 8;
+    struct bno085_can_bno085_data_t msg = s->data;
+    msg.timestamp_ms = now_ms;
+    msg.status = BNO085_CAN_STATUS_OK;
+    return bno085_can_bno085_data_pack(data, &msg, BNO085_CAN_BNO085_DATA_LENGTH) ==
+           (int)BNO085_CAN_BNO085_DATA_PAYLOAD_LENGTH;
 }
 
 void imu_samples_sent(imu_samples_t *s)
 {
+    s->data.seq++;
     s->accel_pending = s->gyro_pending = false;
 }

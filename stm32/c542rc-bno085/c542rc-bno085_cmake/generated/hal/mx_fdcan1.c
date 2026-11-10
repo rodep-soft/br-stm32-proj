@@ -68,7 +68,7 @@ hal_fdcan_handle_t *mx_fdcan1_init(void)
 
   fdcan_config.nominal_bit_timing   = fdcan_nominal_bit_timing;
 
-  fdcan_config.frame_format         = HAL_FDCAN_FRAME_FORMAT_CLASSIC_CAN;
+  fdcan_config.frame_format         = HAL_FDCAN_FRAME_FORMAT_FD_NO_BRS;
   fdcan_config.mode                 = HAL_FDCAN_MODE_NORMAL;
   fdcan_config.auto_retransmission  = HAL_FDCAN_AUTO_RETRANSMISSION_DISABLE;
   fdcan_config.transmit_pause       = HAL_FDCAN_TRANSMIT_PAUSE_DISABLE;
